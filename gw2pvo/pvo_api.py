@@ -8,6 +8,14 @@ __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 
 class PVOutputApi:
+    '''A class to interact with the PVOutput API in order to upload energy production and consumption data.
+    The class has methods to add current system status and historical daily data to the PVOutput database. 
+    The constructor takes in a system_id and api_key which are used for authentication to the PVOutput API.
+    The add_status method takes in various data points such as power produced and consumed, temperature, voltage, 
+        and user-defined data and uploads it to the PVOutput database. 
+    The add_day method takes in daily data as a list of dictionaries, and sends it to the PVOutput database in batches of 30.
+    The call method is a helper function used to make HTTP requests to the PVOutput API. 
+        It sets the necessary headers for authentication and handles error cases, such as rate limiting and server errors.'''
 
     def __init__(self, system_id, api_key):
         self.m_system_id = system_id
@@ -24,8 +32,8 @@ class PVOutputApi:
         data['vpv1']               v9 voltage string 1
         data['vpv2']               v10 voltage string 2
         data['Ppv1']               v11 power string 1
-        data['Ppv2']               v12 power string2
-        '''
+        data['Ppv2']               v12 power string2'''
+        
     def add_status(self, SunUp, pgrid_w, eday_wh, cons_wh, cons_w, temperature, voltage, invertertemp, received_data, vpv1, vpv2, Ppv1, Ppv2):
         t = time.localtime()        
         if SunUp:
@@ -59,26 +67,14 @@ class PVOutputApi:
                 'v3' : round(cons_wh),
                 'v4' : round(cons_w),
             }       
-            if temperature is not None:
-                payload['v8'] = temperature 
-
-#    def add_status(self, pgrid_w, eday_kwh, temperature, voltage):
-#        t = time.localtime()
-#        payload = {
-#            'd' : "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
-#            't' : "{:02}:{:02}".format(t.tm_hour, t.tm_min),
-#            'v1' : round(eday_kwh * 1000),
-#            'v2' : round(pgrid_w)
-#        }
-                       
+                     
 #        print(payload) 
         self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
 
-    def add_day(self, data, temperatures):
+    def add_day(self, data):
         # Send day data in batches of 30.
 
         for chunk in [ data[i:i + 30] for i in range(0, len(data), 30) ]:
-
             readings = []
             for reading in chunk:
                 dt = reading['dt']
@@ -88,13 +84,6 @@ class PVOutputApi:
                     str(round(reading['eday_kwh'] * 1000)),
                     str(reading['pgrid_w'])
                 ]
-
-                if temperatures is not None:
-                    fields.append('')
-                    fields.append('')
-                    temperature = list(filter(lambda x: dt.timestamp() > x['time'], temperatures))[-1]
-                    fields.append(str(temperature['temperature']))
-
                 readings.append(",".join(fields))
 
             payload = {
@@ -111,7 +100,6 @@ class PVOutputApi:
             'X-Pvoutput-SystemId' : self.m_system_id,
             'X-Rate-Limit': '1'
         }
-
         for i in range(1, 4):
             try:
                 r = requests.post(url, headers=headers, data=payload, timeout=10)
@@ -121,18 +109,16 @@ class PVOutputApi:
                     reset = 0
                 if 'X-Rate-Limit-Remaining' in r.headers:
                     if int(r.headers['X-Rate-Limit-Remaining']) < 10:
-                        logging.warning("Only {} requests left, reset after {} seconds".format(
-                            r.headers['X-Rate-Limit-Remaining'],
-                            reset))
+                        logging.warning(f"Only {r.headers['X-Rate-Limit-Remaining']} requests left, reset after {reset} seconds")
                 if r.status_code == 403:
-                    logging.warning("Forbidden: " + r.reason)
+                    logging.warning(f"Forbidden: {r.reason}")
                     time.sleep(reset + 1)
                 else:
                     r.raise_for_status()
                     break
             except requests.exceptions.RequestException as arg:
                 logging.warning(r.text or str(arg))
-            time.sleep(i ** 3)
+            time.sleep(i ** 3) #  pause to prevent from making too many requests too quickly
         else:
             logging.error("Failed to call PVOutput API")
 

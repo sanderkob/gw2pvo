@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 
 __author__ = "Mark Ruys"
@@ -35,13 +35,11 @@ class GoodWeApi:
 
     def getCurrentReadings(self):
         ''' Download the most recent readings from the GoodWe API. '''
-
         payload = {
             'powerStationId' : self.system_id
         }
         data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
-        #        print (data) ####
-  
+        #        print (data) #### 
         result = {
             'status' : 'Unknown',
             'pgrid_w' : 0,
@@ -117,7 +115,7 @@ class GoodWeApi:
         }
         data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
         if 'info' not in data:
-            logging.warning("GetMonitorDetailByPowerstationId returned bad data: " + str(data))
+            logging.warning(f"GetMonitorDetailByPowerstationId returned bad data: {data}")
             return {}
 
         return {
@@ -132,7 +130,7 @@ class GoodWeApi:
         }
         data = self.call("v2/PowerStationMonitor/GetPowerStationPacByDayForApp", payload)
         if 'pacs' not in data:
-            logging.warning("GetPowerStationPacByDayForApp returned bad data: " + str(data))
+            logging.warning(f"GetPowerStationPacByDayForApp returned bad data: {data}")
             return []
 
         return data['pacs']
@@ -202,9 +200,7 @@ class GoodWeApi:
             except requests.exceptions.RequestException as exp:
                 logging.warning(exp)
             time.sleep(i ** 3)
-        else:
-            raise Exception("Failed to call GoodWe API (too many retries)")
-
+        raise Exception("Failed to call GoodWe API (too many retries)")
         return {}
 
     def parseValue(self, value, unit):

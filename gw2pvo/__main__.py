@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """added extra debug logging, no averaging    """
-
-import sys
+from __init__ import __version__
 import os
+import sys
 if sys.version_info < (3, 6):
     sys.exit('Sorry, you need at least Python 3.6 for Astral 2')
 import logging
-import traceback                        # added error traceback in V2"
+import traceback                        # added error traceback in version 2"
 import argparse
 import locale
 import time
@@ -15,13 +15,13 @@ from configparser import ConfigParser
 from astral import LocationInfo
 from astral.geocoder import lookup, database
 from astral.location import Location
-import paho.mqtt.client as mqtt         # added MQTT, currently not in use in V2
+# added MQTT, currently not in use in version 2
+import paho.mqtt.client as mqtt
 import gw_api
 import gw_csv
 import pvo_api
-from __init__ import __version__
 import bcstartv3
-"""added import power meter readings from Beeclear in V2
+"""added import power meter readings from Beeclear in version 2
         Beeclear is a device that makes P1 information available on the LAN"""
 
 __author__ = "Mark Ruys, Sander Kobussen"
@@ -32,13 +32,15 @@ __doc__ = "Upload GoodWe power inverter data to PVOutput.org"
 
 # defaults
 MQTT_SERVER = "192.168.1.236"
-MQTT_TOPIC =  "received_data"  
+MQTT_TOPIC = "received_data"
 data = {}   # data in global scope to make persistent between function calls of run_once
-received_data - None              # dummy user variable to publish with MQTT,
+received_data - None              # dummy user variable to subscribe with MQTT
 
 # initializing global variable
+# in global scope to make persistent between function calls of run_once
 last_eday_kwh = 0
-last_cons_w = 120           # if cons_w (verbruik, watt) is negative, replace by earlier value
+# if cons_w (verbruik, watt) is negative, replace by earlier value
+last_cons_w = 120
 last_cons_wh = 0            # if cons_wh decreases, replace by earlier value
 
 
@@ -53,9 +55,11 @@ def on_message(client, userdata, message) -> None:
     print("message topic=", message.topic)
     print("message qos=", message.qos)
     print("message retain flag=", message.retain)
-    #    msglist = message.payload.split(" ")       # in case message contains severable ietems separated by spaces
-    #    print(msglist)
-    received_data = msglist[0]                     # first or only item in message
+    # in case message contains severable ietems separated by spaces
+    msglist = message.payload.split(" ")
+    logging.info("msglist: %s", msglist)
+    # first or only item in message
+    received_data = msglist[0]
 
 
 def on_connect(client, userdata, flags, rc) -> None:
@@ -82,7 +86,7 @@ def on_connect(client, userdata, flags, rc) -> None:
         logging.warning(client)
         client.subscribe(MQTT_TOPIC, 1)              # qos=1
     else:
-        logging.error("Bad connection Returned code=", rc)
+        logging.error("Bad connection Returned code= %d", rc)
 
 
 def on_disconnect(client, userdata, rc) -> None:
@@ -92,12 +96,12 @@ def on_disconnect(client, userdata, rc) -> None:
         userdata (_type_): user data of any type, can be set when creating a new client - not used
         rc (int): rc indicates the disconnection state. If 0 (MQTT_ERR_SUCCESS),
                   the callback was called in response to a disconnect() call. 
-                  If any other value the disconnection was unexpected (e.g. network error)"""    
+                  If any other value the disconnection was unexpected (e.g. network error)"""
     logging.warning("Client Got Disconnected")
     if rc != 0:
         logging.warning('Unexpected MQTT disconnection. Will auto-reconnect')
     else:
-        logging.warning('rc value:' + str(rc))
+        logging.warning('rc value: %d', rc)
     try:
         client.connect(MQTT_SERVER, keepalive=60)
     except:
@@ -110,15 +114,15 @@ def on_log(client, userdata, level, buf) -> None:
         client (paho.mqtt.client.Client): client instance that is calling the callback
         userdata (_type_): user data of any type, can be set when creating a new client - not used
         level (str):  Level is one of MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR or MQTT_LOG_DEBUG
-        buf (_type_): log message"""    
-    logging.debug("log: ", buf)
+        buf (_type_): log message"""
+    logging.debug("log: %s", buf)
 
 
 def run_once(settings, city) -> None:
     """executed every 'Interval' minutes
     Args:
         settings (_type_): config settings from file, passed from args
-        city (dict): city geo-location derieved from city name in config, to set timezone in non-Windows and skip uploads from dusk till dawn    """    
+        city (dict): city geo-location derieved from city name in config, to set timezone in non-Windows and skip uploads from dusk till dawn    """
     global last_cons_w
     global last_cons_wh
     global received_data
@@ -134,7 +138,7 @@ def run_once(settings, city) -> None:
             logging.debug("Modified upload as it's night")
 
     # Only fetch data when sup up or when no data stored yet
-    if SunUp or not bool(data):             # 
+    if SunUp or not bool(data):             #
         gw = gw_api.GoodWeApi(settings.gw_station_id,
                               settings.gw_account, settings.gw_password)
         data = gw.getCurrentReadings()
@@ -170,19 +174,21 @@ def run_once(settings, city) -> None:
         voltage = data['pv_voltage']
     eday_wh = int(1000 * data['eday_kwh'])
     # print ("eday_wh, data['eday_kwh'] ", eday_wh, data['eday_kwh'])
-    logging.debug("eday_wh = %s , data['eday_kwh'] = %s ", eday_wh, data['eday_kwh'])
+    logging.debug(
+        "eday_wh = %s , data['eday_kwh'] = %s ", eday_wh, data['eday_kwh'])
     pgrid_w = data['pgrid_w']
     cons = bcstartv3.returndata()           # fetch power meter readings
-    
+
     # calculate net consumption as difference of goodwe data and power meter data
     # consumed energy cons_wh = imported energy - exported energy + produced energy
     # consumed power  cons_w  = imported power - exported power + produced power
     # produced energy prod_wh = eday_wh from gw
     # produced power  prop_w  = pgrid_w from gw
-    
-    cons_wh = cons[0] - cons[2] + eday_wh       # consumed energy cons_wh = imported energy - exported energy + produced energy
+
+    # consumed energy cons_wh = imported energy - exported energy + produced energy
+    cons_wh = cons[0] - cons[2] + eday_wh
     logging.debug("cons_wh = %s ", cons_wh)
-    
+
     # at start of the day, reset last_cons_wh and eday_wh
     if (datetime.now().timestamp() - datetime.combine(datetime.now(), datetime.min.time()).timestamp() < 301):    # at midnight
         data['eday_kwh'] = 0
@@ -193,7 +199,8 @@ def run_once(settings, city) -> None:
         cons_wh = last_cons_wh
     last_cons_wh = cons_wh
 
-    cons_w = cons[1] - cons[3] + pgrid_w    # consumed power  cons_w  = imported power - exported power + produced power
+    # consumed power  cons_w  = imported power - exported power + produced power
+    cons_w = cons[1] - cons[3] + pgrid_w
     if cons_w < 0:               # power cannot be negative
         cons_w = last_cons_w
     last_cons_w = cons_w
@@ -213,34 +220,39 @@ def run_once(settings, city) -> None:
         logging.debug(str(data))
         logging.warning("Missing PVO id and/or key")
 
-    logging.debug('Consumption on %.19s : %s Wh, %s W, Production %s Wh, %s W, temp %s, Vcc %s, FW %s\n',
+    logging.debug('Consumption on %.19s : %s Wh, %s W, Production %s Wh, %s W, received data %s\n',
                   datetime.now(), cons_wh, cons_w, prod_wh, prod_w, received_data)
 
 
-
 def copy(settings) -> None:
+    """copy day of readings from GoodWe to PVOutput. Interval will be 10 minutes.
+       Beware that the date parameter must be not be older than 14 days from the current date,
+       in donation mode, not more than 90 days.
+    Args:
+        settings (Namespace): the settings from the gw2pvo.cfg file"""
     # Fetch readings from GoodWe
     date = datetime.strptime(settings.date, "%Y-%m-%d")
-
     gw = gw_api.GoodWeApi(settings.gw_station_id,
                           settings.gw_account, settings.gw_password)
-    data = gw.getDayReadings(date)
+    daydata = gw.getDayReadings(date)
 
     if settings.pvo_system_id and settings.pvo_api_key:
         # Submit readings to PVOutput
         pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
-        pvo.add_day(data['entries'])
+        pvo.add_day(daydata['entries'])
     else:
         for entry in data['entries']:
-            logging.info("{}: {:6.0f} W {:6.2f} kWh".format(
-                entry['dt'],
-                entry['pgrid_w'],
-                entry['eday_wh'],
-            ))
+            logging.info(
+                f"{entry['dt']}: {entry['pgrid_w']:6.0f} W {entry['eday_wh']:6.2f} kWh")
         logging.warning("Missing PVO id and/or key")
 
 
 def run() -> None:
+    """main function:
+       parses gw2pvo.cfg configuration file
+       configures logging,
+       configures mqtt (if enabled),
+       triggers run_once and repeats that at intervals"""
     defaults: dict[str, str] = {
         'log': "info"
     }
@@ -294,44 +306,47 @@ def run() -> None:
                         choices=['debug', 'info', 'warning', 'critical'])
     parser.add_argument(
         "--date", help="Copy all readings (max 14/90 days ago)", metavar='YYYY-MM-DD')
-    parser.add_argument("--pv-voltage", help="Send pv voltage instead of grid voltage", action='store_true')
+    parser.add_argument(
+        "--pv-voltage", help="Send pv voltage instead of grid voltage", action='store_true')
     parser.add_argument(
         "--skip-offline", help="Skip uploads when inverter is offline", action='store_true')
     parser.add_argument(
         "--city", help="Sets timezone and skip uploads from dusk till dawn")
     parser.add_argument(
         '--csv', help="Append readings to a Excel compatible CSV file, DATE in the name will be replaced by the current date")
+    parser.add_argument(
+        '--mqtt', help="Enable MQTT subscribe (receive messages)", action='store_true')
     parser.add_argument('--version', action='version',
                         version='%(prog)s ' + __version__)
     args = parser.parse_args()
-
-    # Configure the logging
-    numeric_level = getattr(logging, args.log.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % loglevel)
-    # logging.basicConfig(filename='/home/pi/gw2pvo.log',filemode='a',format='%(levelname)-8s %(message)s', level=numeric_level) # change to network log loaction
-    logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                        datefmt='%d-%m-%Y %H:%M:%S', level=numeric_level)
-    logging.debug("gw2pvo version " + __version__)
 
     if isinstance(args.skip_offline, str):
         args.skip_offline = args.skip_offline.lower() in [
             'true', 'yes', 'on', '1']
     if isinstance(args.pv_voltage, str):
         args.pv_voltage = args.pv_voltage.lower() in ['true', 'yes', 'on', '1']
+    if isinstance(args.mqtt, str):
+        args.mqtt = args.mqtt.lower() in ['true', 'yes', 'on', '1']
     logging.debug(args)
-
     if args.gw_station_id is None or args.gw_account is None or args.gw_password is None:
         sys.exit("Missing --gw-station-id, --gw-account and/or --gw-password")
-
     if args.city:
         city = Location(lookup(args.city, database()))
         # disabled, maybe necessary when running in windows
         # os.environ['TZ'] = city.timezone
-        # time.tzset() 
+        # time.tzset()
     else:
         city = None
-    logging.debug("Timezone {}".format(datetime.now().astimezone().tzinfo))
+    logging.debug(f"Timezone {datetime.now().astimezone().tzinfo}")
+
+    # Configure the logging
+    numeric_level = getattr(logging, args.log.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f'Invalid log level: {numeric_level}')
+    # logging.basicConfig(filename='/home/pi/gw2pvo.log',filemode='a',format='%(levelname)-8s %(message)s', level=numeric_level) # change to network log loaction
+    logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
+                        datefmt='%d-%m-%Y %H:%M:%S', level=numeric_level)
+    logging.debug("gw2pvo version %s", __version__)
 
     # Check if we want to copy old data
     if args.date:
@@ -344,14 +359,16 @@ def run() -> None:
         sys.exit()
 
     # setup MQTT
-    client = mqtt.Client("gw2pvo")  # create new instance
-    client.connect(MQTT_SERVER, keepalive=60)  # connect to broker
-    client.on_message = on_message
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    # client.on_log=on_log
-    client.loop_start()  # start the loop
-    client.subscribe(MQTT_TOPIC, 1)  # topic received_data, qos=1
+    if args.mqtt:
+        client = mqtt.Client("gw2pvo")              # create new instance
+        client.connect(MQTT_SERVER, keepalive=60)   # connect to broker
+        client.on_message = on_message
+        client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
+        # client.on_log=on_log
+        client.loop_start()                         # start the loop
+        # topic received_data, qos=1
+        client.subscribe(MQTT_TOPIC, 1)
 
     startTime = datetime.now()
     print(startTime)

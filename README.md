@@ -225,15 +225,18 @@ In this fork features have been added, features have been removed and code has b
   - calculate net energy and power consumption
   - upload power consumption and outside temperature when inverter is offline (and --skip-offline false)
   - upload pv data between dawn and dusk, depending on location
-  - receive MQTT data for upload to pvoutput (extended data)
-  - upload voltage and power from two strings to pvoutput (extended data)
+  - receive MQTT data for upload to pvoutput (extended data) if enabled with --mqtt= on in the configuration file
+  - upload voltage and power from two panel strings to pvoutput (extended data)
 - features removed
   - Netatmo
   - Darksky
   - outside temperature upload. It is derived instead from OpenWeatherMap through automatic upload (pvoutput feature)
-  - --pv-voltage option in config (Send pv voltage instead of grid voltage)
 - code updates
-  - removed average.py and references to ???
+  - removed average.py and its references
+  - removed DarkSky temperature references
+  - extended logging
+  - made use of f-strings in logging
+  - added boolean checks on values in the configuration file
 
 ## Versions
 - 2.0.0-a1  initial modification
