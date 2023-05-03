@@ -3,6 +3,9 @@
 
 **This repository is unmaintained. New maintainer(s) are welcomed.**
 
+**This fork (sanderkob) brings the repository to a new version. 
+For features and status see the end of this document.**
+
 gw2pvo is a command line tool to upload solar data from a GoodWe power inverter to the PVOutput.org website.
 
 ## Installation
@@ -24,13 +27,13 @@ Furthermore, you need a (free) [PVOutput](PVOutput.org) account. Register a devi
   1. The API Key
   2. The System Id of your device
 
-### Netatmo
+### Netatmo (removed in this fork)
 
 In case you have some Netatmo weather station nearby, you can use it to fetch the local temperature. First you need to create an (free) account at [developers portal](https://dev.netatmo.com/). Next create an app. This gives you a username, password, client_id, and a client_secret, which you need to supply to `gw2pvo`.
 
 You have the option to either let `gw2pvo` find the nearest public weather station, or to select one yourself.
 
-### Dark Sky
+### Dark Sky (removed in this fork)
 
 Optionally, for actual weather information you can get a (free) [Dark Sky API](https://darksky.net/dev) account. Register and get 1,000 free calls per day. Note that Dark Sky will [shut down](https://blog.darksky.net/dark-sky-has-a-new-home/) it's API in 2021 and does not accept new signups anymore.
 
@@ -214,4 +217,63 @@ Gw2pvo is *not* an official software from GoodWe/Sems and it is not endorsed or 
 GoodWe API access is based on the Chinese Sems Swagger documentation: [global](http://globalapi.sems.com.cn:82/swagger/ui/index), [Europe](http://eu.semsportal.com:82/swagger/ui/index#). It could be very well that at a certain point GoodWe decides to alter or disable the API.
 
 The software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
+
+# New version
+In this fork features have been added, features have been removed and code has been updated.
+- features added
+  - import consumption data from power meter
+  - calculate net energy and power consumption
+  - upload power consumption and outside temperature when inverter is offline (and --skip-offline false)
+  - upload pv data between dawn and dusk, depending on location
+  - receive MQTT data for upload to pvoutput (extended data)
+  - upload voltage and power from two strings to pvoutput (extended data)
+- features removed
+  - Netatmo
+  - Darksky
+  - outside temperature upload. It is derived instead from OpenWeatherMap through automatic upload (pvoutput feature)
+  - --pv-voltage option in config (Send pv voltage instead of grid voltage)
+- code updates
+  - removed average.py and references to ???
+
+## Versions
+- 2.0.0-a1  initial modification
+
+
+## Setting up as server on Raspberry Pi
+
+Create (or edit) the file `` /lib/systemd/system/gw2pvo.service``
+```ini
+ [Unit] 
+ Description=gw2pvo python script 
+ After=multi-user.target
+
+ [Service]
+ Type=idle
+ User=pi
+ ExecStart=/usr/bin/python3 -u /home/pi/python/gw2pvo/__main__.py --config /home/pi/python/gw2pvo/gw2pvo.cfg  
+ StandardOutput=append:/home/pi/systemd.log
+ StandardError=append:/home/pi/systemderr.log
+ 
+ [Install]
+ WantedBy=multi-user.target
+ ```
+ 
+
+ To start (activate) the service, run: 
+ ``systemctl start gw2pvo.service``
+
+ To enable the service at boot, run: 
+```bash
+sudo useradd -m gw2pvo
+sudo systemctl enable gw2pvo
+sudo systemctl start gw2pvo`` 
+```
+
+and check with 
+```bash
+sudo systemctl status gw2pvo
+sudo journalctl -u gw2pvo -f
+```
+
+
 
