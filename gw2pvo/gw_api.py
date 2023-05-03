@@ -40,7 +40,8 @@ class GoodWeApi:
             'powerStationId' : self.system_id
         }
         data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
-
+        #        print (data) ####
+  
         result = {
             'status' : 'Unknown',
             'pgrid_w' : 0,
@@ -48,6 +49,11 @@ class GoodWeApi:
             'etotal_kwh' : 0,
             'grid_voltage' : 0,
             'pv_voltage' : 0,
+            'vpv1' : 0,                 # voltage string 1
+            'vpv2' : 0,                 # voltage string 2
+            'Ppv1' : 0,                 # power string 1
+            'Ppv2' : 0,                 # power string 
+            'temperature' : data['inverter'][0]['tempperature'],  # inverter temperature (sic)
             'latitude' : data['info'].get('latitude'),
             'longitude' : data['info'].get('longitude')
         }
@@ -73,9 +79,13 @@ class GoodWeApi:
             result['status'] = self.statusText(inverterData['status'])
             result['pgrid_w'] = inverterData['out_pac']
             result['grid_voltage'] = self.parseValue(inverterData['output_voltage'], 'V')
-            result['pv_voltage'] = self.calcPvVoltage(inverterData['d'])
-
-        message = "{status}, {pgrid_w} W now, {eday_kwh} kWh today, {etotal_kwh} kWh all time, {grid_voltage} V grid, {pv_voltage} V PV".format(**result)
+            result['pv_voltage'] = self.calcPvVoltage(inverterData['d'])     
+        result['vpv1'] = inverterData['d']['vpv1']
+        result['vpv2'] = inverterData['d']['vpv2']
+        result['Ppv1'] = inverterData['d']['vpv1'] * inverterData['d']['ipv1']
+        result['Ppv2'] = inverterData['d']['vpv2'] * inverterData['d']['ipv2']
+                    
+        message = "{status}, {pgrid_w} W now, {eday_kwh} kWh today, {etotal_kwh} kWh all time, {grid_voltage} V grid, {pv_voltage} V PV, {vpv1} V PV1, {vpv2} V PV2, {Ppv1} W PV1, {Ppv2} W PV2".format(**result)
         if result['status'] == 'Normal' or result['status'] == 'Offline':
             logging.info(message)
         else:
@@ -163,7 +173,7 @@ class GoodWeApi:
                     'Token': self.token,
                 }
 
-                r = requests.post(self.base_url + url, headers=headers, data=payload, timeout=10)
+                r = requests.post(self.base_url + url, headers=headers, data=payload, timeout=30)  # timeout was 10, now 30
                 r.raise_for_status()
                 data = r.json()
                 logging.debug(data)
@@ -180,7 +190,7 @@ class GoodWeApi:
                         'account': self.account,
                         'pwd': self.password,
                     }
-                    r = requests.post(self.global_url + 'v2/Common/CrossLogin', headers=headers, data=loginPayload, timeout=10)
+                    r = requests.post(self.global_url + 'v2/Common/CrossLogin', headers=headers, data=loginPayload, timeout=30) # timeout was 10, now 30
                     r.raise_for_status()
                     data = r.json()
                     if 'api' not in data:
