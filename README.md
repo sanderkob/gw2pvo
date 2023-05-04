@@ -223,10 +223,12 @@ In this fork features have been added, features have been removed and code has b
 - features added
   - import consumption data from power meter
   - calculate net energy and power consumption
-  - upload power consumption and outside temperature when inverter is offline (and --skip-offline false)
+  - upload power consumption and outside temperature when inverter is offline (and --skip-offline= no)
   - upload pv data between dawn and dusk, depending on location
-  - receive MQTT data for upload to pvoutput (extended data) if enabled with --mqtt= on in the configuration file
+  - improved handling of location (add city)
+  - transfer received MQTT data to pvoutput (extended data) if enabled with --mqtt= yes in the configuration file
   - upload voltage and power from two panel strings to pvoutput (extended data)
+  -
 - features removed
   - Netatmo
   - Darksky
@@ -236,7 +238,7 @@ In this fork features have been added, features have been removed and code has b
   - removed DarkSky temperature references
   - extended logging
   - made use of f-strings in logging
-  - added boolean checks on values in the configuration file
+  - added proper boolean checks on values in the configuration file
 
 ## Versions
 - 2.0.0-a1  initial modification
