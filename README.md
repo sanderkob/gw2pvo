@@ -219,62 +219,65 @@ GoodWe API access is based on the Chinese Sems Swagger documentation: [global](h
 The software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
 
 # New version
-In this fork features have been added, features have been removed and code has been updated.
+This fork is a development to combine solar generation data with consumption data. Also generation details for two strings are uploaded (extended data). An MQTT client may be used to uoload extra information (e.g. panel temperature).
+The programme is highly specific for this situation.
+
+In this fork, features have been added, other features have been removed and code has been updated.
 - features added
   - import consumption data from power meter
-  - calculate net energy and power consumption
-  - upload power consumption and outside temperature when inverter is offline (and --skip-offline= no)
+  - calculate net consumption (energy and power)
+  - upload power consumption and outside temperature, also when inverter is offline (and parameter --skip-offline= no in the configuration file)
   - upload pv data between dawn and dusk, depending on location
   - improved handling of location (add city)
-  - transfer received MQTT data to pvoutput (extended data) if enabled with --mqtt= yes in the configuration file
-  - upload voltage and power from two panel strings to pvoutput (extended data)
+  - transfer received MQTT data to PVOutput (extended data) if enabled with --mqtt= yes in the configuration file
+  - upload voltage and power from two panel strings to PVOutput (extended data)
   -
 - features removed
   - Netatmo
   - Darksky
-  - outside temperature upload. It is derived instead from OpenWeatherMap through automatic upload (pvoutput feature)
+  - outside temperature upload. It is derived instead from OpenWeatherMap through automatic upload (PVOutput feature)
 - code updates
   - removed average.py and its references
-  - removed DarkSky temperature references
+  - removed DarkSky and Neatmo temperature references
   - extended logging
   - made use of f-strings in logging
-  - added proper boolean checks on values in the configuration file
+  - added proper boolean checks on values from the configuration file
+  - heavily commented, also in the configuration file
 
 ## Versions
 - 2.0.0-a1  initial modification
-
+- 2.0.0-a2  first cycle of testing
 
 ## Setting up as server on Raspberry Pi
 
-Create (or edit) the file `` /lib/systemd/system/gw2pvo.service``
+Create (or edit) the file `` /etc/systemd/system/gw2pvo.service``
 ```ini
- [Unit] 
- Description=gw2pvo python script 
- After=multi-user.target
+[Unit] 
+Description=gw2pvo python script 
+After=multi-user.target
 
- [Service]
- Type=idle
- User=pi
- ExecStart=/usr/bin/python3 -u /home/pi/python/gw2pvo/__main__.py --config /home/pi/python/gw2pvo/gw2pvo.cfg  
- StandardOutput=append:/home/pi/systemd.log
- StandardError=append:/home/pi/systemderr.log
- 
- [Install]
- WantedBy=multi-user.target
- ```
+[Service]
+Type=idle
+User=pi
+ExecStart=/usr/bin/python3 -u /home/pi/python/gw2pvo/__main__.py --config /home/pi/python/gw2pvo/gw2pvo.cfg  
+StandardOutput=append:/home/pi/gw2pvoOutput.log
+StandardError=append:/home/pi/gw2pvoError.log
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
  
 
  To start (activate) the service, run: 
- ``systemctl start gw2pvo.service``
-
- To enable the service at boot, run: 
-```bash
-sudo useradd -m gw2pvo
-sudo systemctl enable gw2pvo
-sudo systemctl start gw2pvo`` 
+ ```bash
+sudo chmod 644 /etc/systemd/system/gw2pvo.service
+sudo systemctl daemon-reload
+sudo systemctl enable gw2pvo.service
+sudo systemctl start gw2pvo.service
 ```
-
-and check with 
+ Then reboot and check with 
 ```bash
 sudo systemctl status gw2pvo
 sudo journalctl -u gw2pvo -f
