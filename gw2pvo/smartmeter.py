@@ -6,13 +6,13 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import base64
 import json
-import bc3config                #stores host, username, password
+import powerhandlerconfig                #stores host, username, password
 from datetime import datetime
 import time
 
 
 class beeclear:
-    """interaction with BeeClear, a web-based energy management system.
+    """interaction with BeeClear smart meter app
     Attributes:
         hostname : str
             The hostname or IP address of the BeeClear server.
@@ -34,8 +34,7 @@ class beeclear:
         bc.connect()
         data = bc.getbeeclear('get_data?duration=day&period=hour')
         print(data['values'])"""
-        
-        
+           
     def __init__( self, hostname: str, user: str, passwd: str ):
         """initialize a new BeeClear client with the given credentials.
         Parameters:
@@ -55,9 +54,14 @@ class beeclear:
         """connect to the BeeClear server and authenticate the user with the provided credentials.
         If successful, the session cookie is stored in self.cookie."""
         post_args = urlencode( { 'username': base64.b64encode((self.user).encode("utf-8")), 'password': base64.b64encode((self.passwd).encode("utf-8")) } )
-        url = 'http://' + self.hostname + '/bc_login?' + post_args;
+        url = 'http://' + self.hostname + '/bc_login?' + post_args
         req1 = Request(url)
         response = urlopen(req1)
+        response_content = response.read()
+        response_dict = json.loads(response_content.decode("utf-8"))
+        if response_dict['status'] != 200:
+            error_message = response_dict['message']
+            raise Exception("Error {}: {}".format(response_dict['status'], error_message))
         self.cookie = response.headers.get('Set-Cookie')
 
 
@@ -87,11 +91,10 @@ class beeclear:
         Returns:
             dict
                 The response data, parsed as a JSON object."""
-        a = beeclear( bc3config.host, bc3config.username, bc3config.password )
+        a = beeclear(powerhandlerconfig.host, powerhandlerconfig.username, powerhandlerconfig.password )
         a.connect()
         Str_beeclear = a.send(command)
         data = json.loads(Str_beeclear)
-        local_time = datetime.now()
         return data
 
     
@@ -111,7 +114,7 @@ def returndata():
     data0 = {}
     midnight = str(int(datetime.combine(datetime.now(),datetime.min.time()).timestamp()))  # calculate midnight date
     while not bool(data0.get(['meetwaarden'][0])):
-        data0 = beeclear.getbeeclear('bc_getVal?type=elek&date='+midnight) # values at midnight
+        data0 = beeclear.getbeeclear('bc_getVal?type=elek&date='+midnight)  # values at midnight
         #  print (data0.get(['meetwaarden'][0]))
         time.sleep(3)       # sometimes it takes some time to receive the data
 

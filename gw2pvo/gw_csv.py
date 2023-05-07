@@ -6,6 +6,7 @@ __copyright__ = "Copyright 2017, Mark Ruys"
 __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 
+
 class GoodWeCSV:
     """ A class for appending solar inverter data to a CSV file in the GoodWe format.
     Args:
@@ -28,7 +29,7 @@ class GoodWeCSV:
         ''' Append a row to the CSV file. '''
         try:
             with open(self.filename, 'x', newline='') as csvfile:
-                csvfile.write('\ufeff') # Add UTF-8 BOM header
+                csvfile.write('\ufeff')  # Add UTF-8 BOM header
                 csvwriter = csv.writer(csvfile, dialect='excel', delimiter=';')
                 csvwriter.writerow([self.label(field) for field in self.order()])
         except:

@@ -10,20 +10,20 @@ __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 
 class GoodWeApi:
-'''The class interacts with the GoodWe API and retrieves data from it. 
-    It has the following methods:
-    init__(self, system_id, account, password):
-        Initializes the class with the required parameters for accessing the GoodWe API.
-    statusText(self, status):
-        Returns a string representing the status of the inverter.
-    calcPvVoltage(self, data):
-        Calculates and returns the PV voltage.
-    getCurrentReadings(self):
-        Retrieves the most recent readings from the GoodWe API.
-    getActualKwh(self, date):
-        Retrieves the actual kWh of a given date.
-    getLocation(self):
-        Retrieves the location of the system.'''
+    '''The class interacts with the GoodWe API and retrieves data from it. 
+        It has the following methods:
+        init__(self, system_id, account, password):
+            Initializes the class with the required parameters for accessing the GoodWe API.
+        statusText(self, status):
+            Returns a string representing the status of the inverter.
+        calcPvVoltage(self, data):
+            Calculates and returns the PV voltage.
+        getCurrentReadings(self):
+            Retrieves the most recent readings from the GoodWe API.
+        getActualKwh(self, date):
+            Retrieves the actual kWh of a given date.
+        getLocation(self):
+            Retrieves the location of the system.'''
 
     def __init__(self, system_id, account, password):
         '''Initialize a new instance of the SEMSPortal API client.
@@ -44,67 +44,102 @@ class GoodWeApi:
         self.global_url = 'https://semsportal.com/api/'
         self.base_url = self.global_url
 
-def statusText(self, status):
-    '''Return the label corresponding to the given status code.
-        Args:
-            status (int): The status code.
-        Returns:
-            str: The label corresponding to the status code, or "Unknown" if the status code is not recognized.'''
-    labels = { -1 : 'Offline', 0 : 'Waiting', 1 : 'Normal', 2: 'Fault' }
-    return labels[status] if status in labels else 'Unknown'
+    def statusText(self, status):
+        '''Return the label corresponding to the given status code.
+            Args:
+                status (int): The status code.
+            Returns:
+                str: The label corresponding to the status code, or "Unknown" if the status code is not recognized.'''
+        labels = { -1 : 'Offline', 0 : 'Waiting', 1 : 'Normal', 2: 'Fault' }
+        return labels[status] if status in labels else 'Unknown'
 
-def calcPvVoltage(self, data):
-    '''Calculate the total voltage of the photovoltaic panels.
-        Args:
-            data (dict): The data containing the voltage readings for each panel.
-        Returns:
-            float: The total voltage of the photovoltaic panels.'''
-    pv_voltages = [
-        data['vpv' + str(i)]
-        for i in range(1, 5)
-        if 'vpv' + str(i) in data
-        if data['vpv' + str(i)]
-        if data['vpv' + str(i)] < 6553
-    ]
-    return round(sum(pv_voltages), 1)
+    def calcPvVoltage(self, data):
+        '''ABstract the voltages of all PV strings connected.
+            Args:
+                data (dict): The data containing the voltage readings for each string.
+            Returns:
+                float: The total voltage of the photovoltaic panels.'''
+        pv_voltages = [
+            data['vpv' + str(i)]
+            for i in range(1, 5)
+            if 'vpv' + str(i) in data
+            if data['vpv' + str(i)]
+            if data['vpv' + str(i)] < 6553
+        ]
+        return round(sum(pv_voltages)/len(pv_voltages), 1)
 
-def getCurrentReadings(self):
-    '''Download the most recent readings from the GoodWe API and extract the relevant information.
-        Returns:
-            dict: A dictionary containing the following keys:
-                - 'status': The status of the inverter.
-                - 'pgrid_w': The current output power of the inverter.
-                - 'eday_kwh': The energy produced by the inverter in the current day.
-                - 'etotal_kwh': The total energy produced by the inverter.
-                - 'grid_voltage': The voltage of the electrical grid.
-                - 'pv_voltage': The total voltage of the photovoltaic panels.
-                - 'vpv1': The voltage of the first string of photovoltaic panels.
-                - 'vpv2': The voltage of the second string of photovoltaic panels.
-                - 'Ppv1': The power of the first string of photovoltaic panels.
-                - 'Ppv2': The power of the second string of photovoltaic panels.
-                - 'temperature': The temperature of the inverter.
-                - 'latitude': The latitude of the system, if available.
-                - 'longitude': The longitude of the system, if available.'''
-    payload = {
-        'powerStationId' : self.system_id
-    }
-    data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
-    result = {
-        'status' : 'Unknown',
-        'pgrid_w' : 0,
-        'eday_kwh' : 0,
-        'etotal_kwh' : 0,
-        'grid_voltage' : 0,
-        'pv_voltage' : 0,
-        'vpv1' : 0,                 # voltage string 1
-        'vpv2' : 0,                 # voltage string 2
-        'Ppv1' : 0,                 # power string 1
-        'Ppv2' : 0,                 # power string 
-        'temperature' : data['inverter'][0]['tempperature'],  # inverter temperature (sic)
-        'latitude' : data['info'].get('latitude'),
-        'longitude' : data['info'].get('longitude')
-    }
+    def getCurrentReadings(self):
+        '''Download the most recent readings from the GoodWe API and extract the relevant information.
+            Returns:
+                dict: A dictionary containing the following keys:
+                    - 'status': The status of the inverter.
+                    - 'pgrid_w': The current output power of the inverter.
+                    - 'eday_kwh': The energy produced by the inverter in the current day.
+                    - 'etotal_kwh': The total energy produced by the inverter.
+                    - 'grid_voltage': The voltage of the electrical grid.
+                    - 'pv_voltage': The total voltage of the photovoltaic panels.
+                    - 'vpv1': The voltage of the first string of photovoltaic panels.
+                    - 'vpv2': The voltage of the second string of photovoltaic panels.
+                    - 'Ppv1': The power of the first string of photovoltaic panels.
+                    - 'Ppv2': The power of the second string of photovoltaic panels.
+                    - 'temperature': The temperature of the inverter.
+                    - 'latitude': The latitude of the system, if available.
+                    - 'longitude': The longitude of the system, if available.'''
+        payload = {'powerStationId' : self.system_id}
+        data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
+        result = {
+            'status' : 'Unknown',
+            'pgrid_w' : 0,
+            'eday_kwh' : 0,
+            'etotal_kwh' : 0,
+            'grid_voltage' : 0,
+            'pv_voltage' : 0,
+            'vpv1' : 0,                 # voltage string 1
+            'vpv2' : 0,                 # voltage string 2
+            'Ppv1' : 0,                 # power string 1
+            'Ppv2' : 0,                 # power string 
+            'temperature' : data['inverter'][0]['tempperature'],  # inverter temperature (sic)
+            'latitude' : data['info'].get('latitude'),
+            'longitude' : data['info'].get('longitude')
+        }
 
+        count = 0
+        for inverterData in data['inverter']:
+            status = self.statusText(inverterData['status'])
+            if status == 'Normal':
+                result['status'] = status
+                result['pgrid_w'] += inverterData['out_pac']
+                result['grid_voltage'] += self.parseValue(inverterData['output_voltage'], 'V')
+                result['pv_voltage'] += self.calcPvVoltage(inverterData['d'])
+                count += 1
+    #modified 20 mar 2022                
+    #            result['eday_kwh'] += inverterData['eday']
+    #            result['etotal_kwh'] += inverterData['etotal']
+                result['eday_kwh'] += inverterData['eday']
+                result['etotal_kwh'] += inverterData['etotal']
+        if count > 0:
+            # These values should not be the sum, but the average
+            result['grid_voltage'] /= count
+            result['pv_voltage'] /= count
+        elif len(data['inverter']) > 0:
+            # We have no online inverters, then just pick the first
+            inverterData = data['inverter'][0]
+            result['status'] = self.statusText(inverterData['status'])
+            result['pgrid_w'] = inverterData['out_pac']
+            result['grid_voltage'] = self.parseValue(inverterData['output_voltage'], 'V')
+            result['pv_voltage'] = self.calcPvVoltage(inverterData['d'])
+            
+        result['vpv1'] = inverterData['d']['vpv1']
+        result['vpv2'] = inverterData['d']['vpv2']
+        result['Ppv1'] = inverterData['d']['vpv1'] * inverterData['d']['ipv1']
+        result['Ppv2'] = inverterData['d']['vpv2'] * inverterData['d']['ipv2']
+                    
+        message = "{status}, {pgrid_w} W now, {eday_kwh} kWh today, {etotal_kwh} kWh all time, {grid_voltage} V grid, {pv_voltage} V PV, {vpv1} V PV1, {vpv2} V PV2, {Ppv1} W PV1, {Ppv2} W PV2".format(**result)
+        if result['status'] == 'Normal' or result['status'] == 'Offline':
+            logging.debug(message)
+        else:
+            logging.info(message)
+        return result
 
     def getActualKwh(self, date):
         '''Retrieve the actual energy output (in kilowatt-hours) for a specific date from the GoodWe API
@@ -175,7 +210,6 @@ def getCurrentReadings(self):
             and the total energy production in kilowatt-hours for the specified date.'''
         result = self.getLocation()
         pacs = self.getDayPac(date)
-
         hours = 0
         kwh = 0
         result['entries'] = []
@@ -212,10 +246,11 @@ def getCurrentReadings(self):
                     'User-Agent': 'SEMS Portal/3.1 (iPhone; iOS 13.5.1; Scale/2.00)',
                     'Token': self.token,
                 }
+
                 r = requests.post(self.base_url + url, headers=headers, data=payload, timeout=30)  # timeout was 10, now 30
                 r.raise_for_status()
                 data = r.json()
-                logging.debug(data)
+                # logging.debug(data)
                 try:
                     code = int(data['code'])
                 except ValueError:
@@ -240,7 +275,8 @@ def getCurrentReadings(self):
             except requests.exceptions.RequestException as exp:
                 logging.warning(exp)
             time.sleep(i ** 3)
-        raise Exception("Failed to call GoodWe API (too many retries)")
+        else:
+            raise Exception("Failed to call GoodWe API (too many retries)")
         return {}
 
     def parseValue(self, value, unit):
