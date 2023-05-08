@@ -9,7 +9,6 @@ __copyright__ = "Copyright 2017, Mark Ruys"
 __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 
-
 class GoodWeApi:
     '''The class interacts with the GoodWe API and retrieves data from it. 
         It has the following methods:
@@ -51,7 +50,7 @@ class GoodWeApi:
                 status (int): The status code.
             Returns:
                 str: The label corresponding to the status code, or "Unknown" if the status code is not recognized.'''
-        labels = {-1: 'Offline', 0: 'Waiting', 1: 'Normal', 2: 'Fault'}
+        labels = { -1 : 'Offline', 0 : 'Waiting', 1 : 'Normal', 2: 'Fault' }
         return labels[status] if status in labels else 'Unknown'
 
     def calcPvVoltage(self, data):
@@ -86,37 +85,42 @@ class GoodWeApi:
                     - 'temperature': The temperature of the inverter.
                     - 'latitude': The latitude of the system, if available.
                     - 'longitude': The longitude of the system, if available.'''
-        payload = {'powerStationId': self.system_id}
-        data = self.call(
-            "v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
+        payload = {'powerStationId' : self.system_id}
+        data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
         result = {
-            'status': 'Unknown',
-            'pgrid_w': 0,
-            'eday_kwh': 0,
-            'etotal_kwh': 0,
-            'grid_voltage': 0,
-            'pv_voltage': 0,
-            'vpv1': 0,                 # voltage string 1
-            'vpv2': 0,                 # voltage string 2
-            'Ppv1': 0,                 # power string 1
-            'Ppv2': 0,                 # power string 2
-            # inverter temperature (sic)
-            'temperature': data['inverter'][0]['tempperature'],
-            'latitude': data['info'].get('latitude'),
-            'longitude': data['info'].get('longitude')
+            'status' : 'Unknown',
+            'pgrid_w' : 0,
+            'eday_kwh' : 0,
+            'etotal_kwh' : 0,
+            'grid_voltage' : 0,
+            'pv_voltage' : 0,
+            'vpv1' : 0,                 # voltage string 1
+            'vpv2' : 0,                 # voltage string 2
+            'Ppv1' : 0,                 # power string 1
+            'Ppv2' : 0,                 # power string 
+            'temperature' : data['inverter'][0]['tempperature'],  # inverter temperature (sic)
+            'latitude' : data['info'].get('latitude'),
+            'longitude' : data['info'].get('longitude'),
+            'last_refresh' : data['inverter'][0]['last_refresh_time']
         }
-
+        last_refresh=data['inverter'][0]['last_refresh_time']
+        print (last_refresh)
+        # print (result['last_refresh'])
+        last_refresh = datetime.strptime(last_refresh, '%m/%d/%Y %H:%M:%S')
+        print (last_refresh)
+        print (last_refresh.timestamp())
+        last_refresh=int(last_refresh.timestamp())
+        print (last_refresh)
         count = 0
         for inverterData in data['inverter']:
             status = self.statusText(inverterData['status'])
             if status == 'Normal':
                 result['status'] = status
                 result['pgrid_w'] += inverterData['out_pac']
-                result['grid_voltage'] += self.parseValue(
-                    inverterData['output_voltage'], 'V')
+                result['grid_voltage'] += self.parseValue(inverterData['output_voltage'], 'V')
                 result['pv_voltage'] += self.calcPvVoltage(inverterData['d'])
                 count += 1
-    # modified 20 mar 2022
+    #modified 20 mar 2022                
     #            result['eday_kwh'] += inverterData['eday']
     #            result['etotal_kwh'] += inverterData['etotal']
                 result['eday_kwh'] += inverterData['eday']
@@ -130,17 +134,15 @@ class GoodWeApi:
             inverterData = data['inverter'][0]
             result['status'] = self.statusText(inverterData['status'])
             result['pgrid_w'] = inverterData['out_pac']
-            result['grid_voltage'] = self.parseValue(
-                inverterData['output_voltage'], 'V')
+            result['grid_voltage'] = self.parseValue(inverterData['output_voltage'], 'V')
             result['pv_voltage'] = self.calcPvVoltage(inverterData['d'])
-
+            
         result['vpv1'] = inverterData['d']['vpv1']
         result['vpv2'] = inverterData['d']['vpv2']
         result['Ppv1'] = inverterData['d']['vpv1'] * inverterData['d']['ipv1']
         result['Ppv2'] = inverterData['d']['vpv2'] * inverterData['d']['ipv2']
-
-        message = "{status}, {pgrid_w} W now, {eday_kwh} kWh today, {etotal_kwh} kWh all time, {grid_voltage} V grid, {pv_voltage} V PV, {vpv1} V PV1, {vpv2} V PV2, {Ppv1} W PV1, {Ppv2} W PV2".format(
-            **result)
+                    
+        message = "{status}, {pgrid_w} W now, {eday_kwh} kWh today, {etotal_kwh} kWh all time, {grid_voltage} V grid, {pv_voltage} V PV, {vpv1} V PV1, {vpv2} V PV2, {Ppv1} W PV1, {Ppv2} W PV2".format(**result)
         if result['status'] == 'Normal' or result['status'] == 'Offline':
             logging.debug(message)
         else:
@@ -155,12 +157,11 @@ class GoodWeApi:
         Returns:
             float: The actual energy output in kilowatt-hours for the specified date.'''
         payload = {
-            'powerstation_id': self.system_id,
-            'count': 1,
-            'date': date.strftime('%Y-%m-%d')
+            'powerstation_id' : self.system_id,
+            'count' : 1,
+            'date' : date.strftime('%Y-%m-%d')
         }
-        data = self.call(
-            "v2/PowerStationMonitor/GetPowerStationPowerAndIncomeByDay", payload)
+        data = self.call("v2/PowerStationMonitor/GetPowerStationPowerAndIncomeByDay", payload)
         if not data:
             logging.warning("GetPowerStationPowerAndIncomeByDay missing data")
             return 0
@@ -177,17 +178,15 @@ class GoodWeApi:
         Returns:
             dict: A dictionary containing the latitude and longitude coordinates of the solar power system.'''
         payload = {
-            'powerStationId': self.system_id
+            'powerStationId' : self.system_id
         }
-        data = self.call(
-            "v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
+        data = self.call("v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
         if 'info' not in data:
-            logging.warning(
-                f"GetMonitorDetailByPowerstationId returned bad data: {data}")
+            logging.warning(f"GetMonitorDetailByPowerstationId returned bad data: {data}")
             return {}
         return {
-            'latitude': data['info'].get('latitude'),
-            'longitude': data['info'].get('longitude'),
+            'latitude' : data['info'].get('latitude'),
+            'longitude' : data['info'].get('longitude'),
         }
 
     def getDayPac(self, date):
@@ -198,14 +197,12 @@ class GoodWeApi:
         Returns:
             list: A list of power output data samples, each containing a timestamp and a power output value in watts.'''
         payload = {
-            'id': self.system_id,
-            'date': date.strftime('%Y-%m-%d')
+            'id' : self.system_id,
+            'date' : date.strftime('%Y-%m-%d')
         }
-        data = self.call(
-            "v2/PowerStationMonitor/GetPowerStationPacByDayForApp", payload)
+        data = self.call("v2/PowerStationMonitor/GetPowerStationPacByDayForApp", payload)
         if 'pacs' not in data:
-            logging.warning(
-                f"GetPowerStationPacByDayForApp returned bad data: {data}")
+            logging.warning(f"GetPowerStationPacByDayForApp returned bad data: {data}")
             return []
         return data['pacs']
 
@@ -225,14 +222,13 @@ class GoodWeApi:
         kwh = 0
         result['entries'] = []
         for sample in pacs:
-            parsed_date = datetime.strptime(
-                sample['date'], "%m/%d/%Y %H:%M:%S")
+            parsed_date = datetime.strptime(sample['date'], "%m/%d/%Y %H:%M:%S")
             next_hours = parsed_date.hour + parsed_date.minute / 60
             pgrid_w = sample['pac']
             if pgrid_w > 0:
                 kwh += pgrid_w / 1000 * (next_hours - hours)
                 result['entries'].append({
-                    'dt': parsed_date,
+                    'dt' : parsed_date,
                     'pgrid_w': pgrid_w,
                     'eday_kwh': round(kwh, 3)
                 })
@@ -259,16 +255,15 @@ class GoodWeApi:
                     'Token': self.token,
                 }
 
-                # timeout was 10, now 30
-                r = requests.post(self.base_url + url,
-                                  headers=headers, data=payload, timeout=30)
+                r = requests.post(self.base_url + url, headers=headers, data=payload, timeout=30)  # timeout was 10, now 30
                 r.raise_for_status()
                 data = r.json()
+                # logging.debug(data)
                 try:
                     code = int(data['code'])
                 except ValueError:
                     raise Exception("Failed to call GoodWe API (no code)")
-
+                
                 if code == 0 and data['data'] is not None:
                     return data['data']
                 elif code == 100001:
@@ -276,8 +271,7 @@ class GoodWeApi:
                         'account': self.account,
                         'pwd': self.password,
                     }
-                    r = requests.post(self.global_url + 'v2/Common/CrossLogin', headers=headers,
-                                      data=loginPayload, timeout=30)  # timeout was 10, now 30
+                    r = requests.post(self.global_url + 'v2/Common/CrossLogin', headers=headers, data=loginPayload, timeout=30) # timeout was 10, now 30
                     r.raise_for_status()
                     data = r.json()
                     if 'api' not in data:
@@ -285,8 +279,7 @@ class GoodWeApi:
                     self.base_url = data['api']
                     self.token = json.dumps(data['data'])
                 else:
-                    raise Exception(
-                        "Failed to call GoodWe API (code {})".format(code))
+                    raise Exception("Failed to call GoodWe API (code {})".format(code))
             except requests.exceptions.RequestException as exp:
                 logging.warning(exp)
             time.sleep(i ** 3)

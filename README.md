@@ -218,24 +218,30 @@ GoodWe API access is based on the Chinese Sems Swagger documentation: [global](h
 
 The software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
 
-# New version
-This fork is a development to combine solar generation data with consumption data. Also generation details for two strings are uploaded (extended data). An MQTT client may be used to uoload extra information (e.g. panel temperature).
-The programme is highly specific for this situation.
+# New version - v2
+This fork is a development to combine solar generation data with consumption data. Also generation details for two strings are uploaded (extended data). An MQTT client may be used to upoad extra information (e.g. panel temperature).
+
+The programme is backwards compatible, if no smart meter interface is present, only generation data are uploaded.
 
 In this fork, features have been added, other features have been removed and code has been updated.
 - features added
-  - import consumption data from power meter
+  - import consumption data from smart meter  
+  (interface supplied is for a Beeclear device)
   - calculate net consumption (energy and power)
-  - upload power consumption and outside temperature, also when inverter is offline (and parameter --skip-offline= no in the configuration file)
+  - upload power consumption and outside temperature,  
+  also when the inverter is offline  
+  (and parameter --skip-offline= no in the configuration file)
   - upload pv data between dawn and dusk, depending on location
   - improved handling of location (add city)
-  - transfer received MQTT data to PVOutput (extended data) if enabled with --mqtt= yes in the configuration file
+  - upload received MQTT data to PVOutput (extended data)  
+  if enabled by specifying mqtt broker an d- topic in the configuration file
   - upload voltage and power from two panel strings to PVOutput (extended data)
-  -
+
 - features removed
   - Netatmo
   - Darksky
   - outside temperature upload. It is derived instead from OpenWeatherMap through automatic upload (PVOutput feature)
+
 - code updates
   - removed average.py and its references
   - removed DarkSky and Neatmo temperature references
