@@ -59,7 +59,7 @@ class GoodWeApi:
             Args:
                 data (dict): The data containing the voltage readings for each string.
             Returns:
-                float: The total voltage of the photovoltaic panels.'''
+                float: The average voltage of the photovoltaic panels.'''
         pv_voltages = [
             data['vpv' + str(i)]
             for i in range(1, 5)
@@ -67,7 +67,11 @@ class GoodWeApi:
             if data['vpv' + str(i)]
             if data['vpv' + str(i)] < 6553
         ]
-        return round(sum(pv_voltages)/len(pv_voltages), 1)
+        if len(pv_voltages):
+            pv_voltage = round(sum(pv_voltages)/len(pv_voltages), 1)
+        else:
+            pv_voltage = 0
+        return pv_voltage
 
     def getCurrentReadings(self):
         '''Download the most recent readings from the GoodWe API and extract the relevant information.
