@@ -69,6 +69,7 @@ class PVOutputApi:
                 'd': payload['d'],
                 't': payload['t'],
                 'n':1,
+                'v1': r(generated_energy),
                 'v2': r(export_power),
                 'v4': r(import_power)
             }

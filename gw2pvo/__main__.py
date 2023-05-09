@@ -213,7 +213,7 @@ def run_once(data, settings, city) -> None:
         pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
         if smartmeter_present:
             pvo.add_status(sun_up, generated_power, generated_energy, consumed_energy, consumed_power, temperature,
-                           voltage, inverter_temperature, v8_data, data['vpv1'], data['vpv2'], data['Ppv1'], data['Ppv2'], meter_data[1],meter_data[3])
+                           voltage, inverter_temperature, v8_data, data['vpv1'], data['vpv2'], data['Ppv1'], data['Ppv2'], meter_data[3],meter_data[1])
         else:
             pvo.add_status(sun_up, generated_power, generated_energy, None, None, temperature, voltage,
                            inverter_temperature, v8_data, None, None, None, None)
