@@ -21,31 +21,62 @@ class PVOutputApi:
     def __init__(self, system_id, api_key):
         self.m_system_id = system_id
         self.m_api_key = api_key
-        '''upload format (using extended data v7-v12):
-        data['pgrid_w']            v1 power produced
-        last_eday_wh               v2 energy produced
-        cons_wh                    v3 energy consumed
-        cons_w                     v4 power consumed
-        data.get('temperature')    v5 dummy (outside temperature from OpenWeatherMap)
-        voltage                    v6 line voltage
-        data['temperature']        v7 inverter temperature
-        v8data              v8 user defined data from MQTT
-        data['vpv1']               v9 voltage string 1
-        data['vpv2']               v10 voltage string 2
-        data['Ppv1']               v11 power string 1
-        data['Ppv2']               v12 power string2'''
 
-    def add_status(self, pvo_data):
-        '''adds PV data to the PVOutput database through a HTTP POST request. 
-        If the sun is up, the function adds additionally energy production, inverter temperature, AC voltage and string voltage and power.
+    def add_status(self, sun_up, generated_power, generated_energy, consumed_energy, consumed_power, temperature, voltage, inverter_temperature, v8_data, vpv1, vpv2, Ppv1, Ppv2, export_power, import_power):
+        '''adds smart meter data to the PVOutput database through a HTTP POST request. 
+        If the sun is up, the function adds additionally energy production, inverter temperature, AC voltage and string voltage and power. 
+        Export_power and import_power are uploaded with n=1 to let PVoutput.org smoothen the generated_energy data,
+        see https://pvoutput.org/help/api_specification.html#net-data
         The function returns nothing.'''
+        # inline function to round if not None
+        def r(x): return round(x) if x else None
         t = time.localtime()
-        payload = {
-            'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
-            't': "{:02}:{:02}".format(t.tm_hour, t.tm_min)
-        }
-        payload.update(pvo_data)
+        if sun_up:
+            payload = {
+                'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
+                't': "{:02}:{:02}".format(t.tm_hour, t.tm_min),
+                # 'v1': r(generated_energy),
+                'v2': r(generated_power),
+                'v3': r(consumed_energy),
+                'v4': r(consumed_power),
+                'v9': r(vpv1),
+                'v10': r(vpv2),
+                'v11': r(Ppv1),
+                'v12': r(Ppv2)
+            }
+            # v5 is reserved for temperature, the outside temperature is derived from OpenWeatherMap through automatic upload in pvoutput
+            if voltage is not None:
+                payload['v6'] = voltage
+            if inverter_temperature is not None:
+                payload['v7'] = inverter_temperature
+            if v8_data is not None:
+                payload['v8'] = v8_data
+        else:
+            payload = {
+                'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
+                't': "{:02}:{:02}".format(t.tm_hour, t.tm_min),
+                'v3': r(consumed_energy),
+                'v4': r(consumed_power)
+            }
+            if v8_data is not None:
+                payload['v8'] = v8_data
+
         self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
+        logging.debug(payload)
+
+        if sun_up:
+            payload = {
+                'd': payload['d'],
+                't': payload['t'],
+                'n':1,
+                'v2': r(export_power),
+                'v4': r(import_power)
+            }
+            self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
+            logging.debug(payload)
+
+
+
 
     def add_day(self, data):
         '''adds day data to the PVOutput system in batches of 30. 
@@ -59,7 +90,9 @@ class PVOutputApi:
         The batch of readings is then sent to the `addbatchstatus.jsp` API endpoint of PVOutput.'''
 
         # Send day data in batches of 30.
+
         for chunk in [data[i:i + 30] for i in range(0, len(data), 30)]:
+
             readings = []
             for reading in chunk:
                 dt = reading['dt']
@@ -85,7 +118,7 @@ class PVOutputApi:
             payload (dict): The data to send in the request.
         Returns:
             None.'''
-        logging.debug(payload)
+        # logging.debug(payload)
 
         headers = {
             'X-Pvoutput-Apikey': self.m_api_key,
@@ -105,6 +138,7 @@ class PVOutputApi:
                     if int(r.headers['X-Rate-Limit-Remaining']) < 10:
                         logging.warning(
                             f"Only {r.headers['X-Rate-Limit-Remaining']} requests left, reset after {reset} seconds")
+                logging.debug(f'status code {r.status_code}')
                 if r.status_code == 403:
                     logging.warning(f"Forbidden: {r.reason}")
                     time.sleep(reset + 1)

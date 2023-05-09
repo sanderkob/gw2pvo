@@ -104,8 +104,7 @@ class GoodWeApi:
             'vpv2': 0,                 # voltage string 2
             'Ppv1': 0,                 # power string 1
             'Ppv2': 0,                 # power string 2
-            # inverter temperature (sic)
-            'temperature': data['inverter'][0]['tempperature'],
+            'temperature': data['inverter'][0]['tempperature'],              # inverter temperature (sic)
             'latitude': data['info'].get('latitude'),
             'longitude': data['info'].get('longitude')
         }

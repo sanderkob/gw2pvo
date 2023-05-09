@@ -138,7 +138,6 @@ def returndata():
     import_power = u
     export_energy = (gl-gl0) + (gh-gh0)
     export_power = g
-    
-    meter_data = {"import_energy" : import_energy, "import_power" : import_power, "export_energy" : export_energy, "export_power" : export_power}
 
+    meter_data = [import_energy, import_power, export_energy, export_power]
     return meter_data
