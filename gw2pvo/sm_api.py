@@ -2,13 +2,13 @@
 """Connects to Beeclear device ( https://forum.beeclear.nl/attachment.php?aid=35 )
        and downloads json, format https://www.beeclear.nl/docs/bc_api0.0.4.pdf    """
 
+from datetime import datetime
+import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import base64
 import json
-import smartmeterconfig  # stores host, username, password
-from datetime import datetime
-import time
+import smconfig  # stores host, username, password
 
 
 class beeclear:
@@ -90,8 +90,8 @@ class beeclear:
         Returns:
             dict
                 The response data, parsed as a JSON object."""
-        a = beeclear(smartmeterconfig.host,
-                     smartmeterconfig.username, smartmeterconfig.password)
+        a = beeclear(smconfig.host,
+                     smconfig.username, smconfig.password)
         a.connect()
         Str_beeclear = a.send(command)
         data = json.loads(Str_beeclear)
@@ -101,8 +101,8 @@ class beeclear:
 def returndata():
     """ returns a list of four values representing the current energy import and export.
         The function first gets the meter readings at midnight of the current date from the Beeclear API.
-        It waits until the API returns non-empty data before proceeding. 
-        Then, it retrieves the current meter readings from the API and calculates the energy imported and exported since midnight. 
+        It waits until the API returns non-empty data before proceeding.
+        Then, it retrieves the current meter readings from the API and calculates the energy imported and exported since midnight.
         The calculated values are
         returned as a list with the following elements:
         1. Energy imported in watt-hour (Wh) since midnight

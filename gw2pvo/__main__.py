@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 
+import pvo_api
+import gw_csv
+import gw_api
 from __init__ import __version__
-import os
+import paho.mqtt.client as mqtt
+from astral.location import Location
+from astral.geocoder import lookup, database
 import sys
 if sys.version_info < (3, 6):
     sys.exit('Sorry, you need at least Python 3.6 for Astral 2')
+import uuid
+from configparser import ConfigParser
+from datetime import datetime
+import time
+import locale
+import argparse
 import logging
 import traceback            # added in version 2
 sys.tracebacklimit = 0      # but only used for debugging, set = 0 to disable
-import argparse
-import locale
-import time
-from datetime import datetime
-from configparser import ConfigParser
-from astral.geocoder import lookup, database
-from astral.location import Location
-import paho.mqtt.client as mqtt
-import uuid
-import gw_api
-import gw_csv
-import pvo_api
 # import smartmeter if present, otherwise set smartmeter_present false
 smartmeter_present = True
 try:
-    import smartmeter
+    import sm_api
 except ImportError:
     smartmeter_present = False
     logging.debug("No smart meter present")
@@ -34,17 +33,15 @@ __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 __doc__ = "Upload GoodWe power inverter data to PVOutput.org"
 
-# defaults
-
-# # initializing global variables
+# initializing global variables
 v8_data = None  # user variable may be supplied by MQTT
 
 # the following variables are in global scope to make their values persistent between function calls of run_once()
-# For 24h registration of power consumption, the goodwe data is needed also when the inverter is offline
-
-data = {}                     # goodwe data
-last_consumed_power = 120     # if consumed_power is negative, replace by earlier value
+# esp. for 24h registration, the goodwe generated energy is needed also when the inverter is offline
+data = {}
+last_consumed_power = 0       # if consumed_power is negative, replace by earlier value
 last_consumed_energy = 0      # if consumed energy decreases, replace by earlier value
+last_generated_energy = 0     # if generated energy decreases, replace by earlier value
 mqtt_broker = ""
 mqtt_topic = ""
 
@@ -125,14 +122,16 @@ def on_log(client, userdata, level, buf) -> None:
     logging.debug(f"log: {buf}")
 
 
-def run_once(data, settings, city) -> None:
+def run_once(settings, city) -> None:
     """misleading name, the function is executed every 'Interval' minutes.
     It handles downloads of data from powerhandler, uploads to PVOutput, copying of day readings and preparing csv file.
     Args:
         settings (_type_): config settings from file, passed from args
         city (dict): city geo-location derived from city name in config, used to set timezone in non-Windows and skip uploads from dusk till dawn"""
+    global data
     global last_consumed_power
     global last_consumed_energy
+    global last_generated_energy
     global v8_data
 
     # Check daylight for enabling pvo upload
@@ -171,14 +170,20 @@ def run_once(data, settings, city) -> None:
     voltage = data['grid_voltage']
     if settings.pv_voltage:
         voltage = data['pv_voltage']
+
     generated_energy = int(1000 * data['eday_kwh'])
+
+    if generated_energy < last_generated_energy:   # generated energy can not become less
+        generated_energy = last_generated_energy
+    last_generated_energy = generated_energy
+
     logging.debug(
         f"generated energy = {generated_energy}, data['eday_kwh'] = {data['eday_kwh']}")
     generated_power = round(data['pgrid_w'])
 
     # is there a smart meter available to upload consumption data?
     if smartmeter_present:
-        meter_data = smartmeter.returndata()  # fetch power meter readings
+        meter_data = sm_api.returndata()  # fetch power meter readings
         logging.debug(
             f'import_energy {meter_data[0]}, import_power {meter_data[1]}, export_energy {meter_data[2]}, export_power {meter_data[3]}')
         # logging.debug(
@@ -192,28 +197,31 @@ def run_once(data, settings, city) -> None:
         if (datetime.now().timestamp() - datetime.combine(datetime.now(),
                                                           datetime.min.time()).timestamp() < 301):
             # should be 0 until we receive new data, so make it persistent between function calls
-            data['eday_kwh'] = 0
+            generated_energy = 0
+            last_generated_energy = 0
             consumed_energy = round(meter_data[0] - meter_data[2])
             last_consumed_energy = consumed_energy
 
         if consumed_energy < last_consumed_energy:   # consumed energy can not become less
             consumed_energy = last_consumed_energy
-            last_consumed_energy = consumed_energy
+        last_consumed_energy = consumed_energy
 
         # consumed power  cons_w  = imported power - exported power + produced power
         consumed_power = round(meter_data[1] - meter_data[3] + generated_power)
+
         if consumed_power < 0:               # power cannot be negative
             consumed_power = last_consumed_power
-            last_consumed_power = consumed_power
-#    logging.debug('Verbruik op %.19s : %s Wh, %s W, Productie %s Wh, %s W, temp %s, Vcc %s, FW %s\n',datetime.now(),cons_wh, cons_w, prod_wh, prod_w, paneltemp,Vcc,fw_version)
+        last_consumed_power = consumed_power
+
         logging.debug(
             f'Consumption on {datetime.now().strftime("%Y-%m-%d %H:%M.%S")}  : {consumed_energy}Wh, {consumed_power}W, Production {generated_energy}Wh, {generated_power}W, v8data {v8_data}')
 
+    # send out data to PVoutput
     if settings.pvo_system_id and settings.pvo_api_key:
         pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
         if smartmeter_present:
             pvo.add_status(sun_up, generated_power, generated_energy, consumed_energy, consumed_power, temperature,
-                           voltage, inverter_temperature, v8_data, data['vpv1'], data['vpv2'], data['Ppv1'], data['Ppv2'], meter_data[3],meter_data[1])
+                           voltage, inverter_temperature, v8_data, data['vpv1'], data['vpv2'], data['Ppv1'], data['Ppv2'], meter_data[3], meter_data[1])
         else:
             pvo.add_status(sun_up, generated_power, generated_energy, None, None, temperature, voltage,
                            inverter_temperature, v8_data, None, None, None, None)
@@ -227,7 +235,7 @@ def run_once(data, settings, city) -> None:
 def copy(settings) -> None:
     """copy day of readings from GoodWe to PVOutput. Interval will be 10 minutes.
        Beware that the date parameter must be not be older than 14 days from the current date,
-       in donation mode, not more than 90 days.
+       in donation mode not more than 90 days.
     Args:
         settings (Namespace): the settings from the gw2pvo.cfg file"""
     # Fetch readings from GoodWe
@@ -404,7 +412,7 @@ def run() -> None:
 
     while True:
         try:
-            run_once(data, args, city)
+            run_once(args, city)
         except KeyboardInterrupt:
             sys.exit(1)
         except Exception as exp:

@@ -35,7 +35,7 @@ class PVOutputApi:
             payload = {
                 'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
                 't': "{:02}:{:02}".format(t.tm_hour, t.tm_min),
-                # 'v1': r(generated_energy),
+                'v1': r(generated_energy),
                 'v2': r(generated_power),
                 'v3': r(consumed_energy),
                 'v4': r(consumed_power),
@@ -49,8 +49,7 @@ class PVOutputApi:
                 payload['v6'] = voltage
             if inverter_temperature is not None:
                 payload['v7'] = inverter_temperature
-            if v8_data is not None:
-                payload['v8'] = v8_data
+
         else:
             payload = {
                 'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
@@ -58,26 +57,24 @@ class PVOutputApi:
                 'v3': r(consumed_energy),
                 'v4': r(consumed_power)
             }
-            if v8_data is not None:
-                payload['v8'] = v8_data
+
+        if v8_data is not None:
+            payload['v8'] = v8_data
 
         self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
         logging.debug(payload)
 
-        if sun_up:
-            payload = {
-                'd': payload['d'],
-                't': payload['t'],
-                'n':1,
-                'v1': r(generated_energy),
-                'v2': r(export_power),
-                'v4': r(import_power)
-            }
-            self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
-            logging.debug(payload)
-
-
-
+        # if sun_up:
+        #     payload = {
+        #         'd': payload['d'],
+        #         't': payload['t'],
+        #         'n' :1,
+        #         'v1': r(generated_energy),
+        #         'v2': r(export_power),
+        #         'v4': r(import_power)
+        #     }
+        #     self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
+        #     logging.debug(payload)
 
     def add_day(self, data):
         '''adds day data to the PVOutput system in batches of 30. 
