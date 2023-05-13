@@ -104,7 +104,8 @@ class GoodWeApi:
             'vpv2': 0,                 # voltage string 2
             'Ppv1': 0,                 # power string 1
             'Ppv2': 0,                 # power string 2
-            'temperature': data['inverter'][0]['tempperature'],              # inverter temperature (sic)
+            # inverter temperature (sic)
+            'temperature': data['inverter'][0]['tempperature'],
             'latitude': data['info'].get('latitude'),
             'longitude': data['info'].get('longitude')
         }
@@ -186,7 +187,7 @@ class GoodWeApi:
             "v2/PowerStation/GetMonitorDetailByPowerstationId", payload)
         if 'info' not in data:
             logging.warning(
-                f"GetMonitorDetailByPowerstationId returned bad data: {data}")
+                f'GetMonitorDetailByPowerstationId returned bad data: {data}')
             return {}
         return {
             'latitude': data['info'].get('latitude'),
@@ -208,7 +209,7 @@ class GoodWeApi:
             "v2/PowerStationMonitor/GetPowerStationPacByDayForApp", payload)
         if 'pacs' not in data:
             logging.warning(
-                f"GetPowerStationPacByDayForApp returned bad data: {data}")
+                f'GetPowerStationPacByDayForApp returned bad data: {data}')
             return []
         return data['pacs']
 

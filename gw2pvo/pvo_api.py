@@ -148,4 +148,4 @@ class PVOutputApi:
             # pause to prevent from making too many requests too quickly
             time.sleep(i ** 3)
         else:
-            logging.error("Failed to call PVOutput API")
+            logging.error('Failed to call PVOutput API')

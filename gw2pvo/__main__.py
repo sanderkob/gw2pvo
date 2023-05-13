@@ -25,7 +25,7 @@ try:
     import sm_api
 except ImportError:
     smartmeter_present = False
-    logging.debug("No smart meter present")
+    logging.debug('No smart meter present')
 
 __author__ = "Mark Ruys, Sander Kobussen"
 __copyright__ = "Copyright 2017-2020, Mark Ruys; 2023 Sander Kobussen"
@@ -33,15 +33,18 @@ __license__ = "MIT"
 __email__ = "mark@paracas.nl"
 __doc__ = "Upload GoodWe power inverter data to PVOutput.org"
 
-# initializing global variables
-v8_data = None  # user variable may be supplied by MQTT
 
-# the following variables are in global scope to make their values persistent between function calls of run_once()
-# esp. for 24h registration, the goodwe generated energy is needed also when the inverter is offline
-data = {}
-last_consumed_power = 0       # if consumed_power is negative, replace by earlier value
-last_consumed_energy = 0      # if consumed energy decreases, replace by earlier value
-last_generated_energy = 0     # if generated energy decreases, replace by earlier value
+class last:
+    '''serves to preserve values of variables inside run_once()) between calls and
+    also when the inverter is offline'''
+    generated_energy = 0     # if generated energy decreases, replace by earlier value
+    consumed_power = 0       # if consumed_power is negative, replace by earlier value
+    consumed_energy = 0      # if consumed energy decreases, replace by earlier value
+
+
+# initializing global variables
+data = {}       # initialize gw data
+v8_data = None  # user variable may be supplied by MQTT
 mqtt_broker = ""
 mqtt_topic = ""
 
@@ -53,6 +56,7 @@ def on_message(client, userdata, message) -> None:
         userdata (_type_): user data of any type, can be set when creating a new client - not used
         message (str): _description_    """
     global v8_data
+    global mqtt_topic
     message.payload = message.payload.decode("utf-8")
     # print("message received ", message.payload)
     # print("message topic=", message.topic)
@@ -61,7 +65,7 @@ def on_message(client, userdata, message) -> None:
     if message.topic == mqtt_topic:
         # split in case message contains severable items separated by spaces
         msglist = message.payload.split(" ")
-        logging.info("msglist: %s", msglist)
+        logging.info(f'msglist: {msglist}')
         # first or only item in message
         v8_data = msglist[0]
 
@@ -85,12 +89,13 @@ def on_connect(client, userdata, flags, rc) -> None:
                                         5: Connection refused - not authorised
                                         6-255: Currently unused."""
 
+    global mqtt_topic
     if rc == 0:
-        logging.info("connected OK Returned code=0")
+        logging.info('connected OK Returned code=0')
         # subscribe to topic with qos=1
         client.subscribe(mqtt_topic, 1)
     else:
-        logging.error("Bad connection Returned code= %d", rc)
+        logging.error(f'Bad connection Returned code= {rc}')
 
 
 def on_disconnect(client, userdata, rc) -> None:
@@ -101,7 +106,8 @@ def on_disconnect(client, userdata, rc) -> None:
         rc (int): rc indicates the disconnection state. If 0 (MQTT_ERR_SUCCESS),
                   the callback was called in response to a disconnect() call.
                   If any other value, the disconnection was unexpected (e.g. network error)"""
-    logging.warning("Client Got Disconnected")
+    global mqtt_broker
+    logging.warning('Client Got Disconnected')
     if rc != 0:
         logging.warning('Unexpected MQTT disconnection. Will auto-reconnect')
     else:
@@ -119,7 +125,7 @@ def on_log(client, userdata, level, buf) -> None:
         userdata (_type_): user data of any type, can be set when creating a new client - not used
         level (str):  Level is one of MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR or MQTT_LOG_DEBUG
         buf (_type_): log message"""
-    logging.debug(f"log: {buf}")
+    logging.debug(f'log: {buf}')
 
 
 def run_once(settings, city) -> None:
@@ -128,11 +134,9 @@ def run_once(settings, city) -> None:
     Args:
         settings (_type_): config settings from file, passed from args
         city (dict): city geo-location derived from city name in config, used to set timezone in non-Windows and skip uploads from dusk till dawn"""
-    global data
-    global last_consumed_power
-    global last_consumed_energy
-    global last_generated_energy
-    global v8_data
+
+    global data  # Goodwe data to be received
+    global v8_data  # extra data from mqtt
 
     # Check daylight for enabling pvo upload
     sun_up = True
@@ -140,19 +144,20 @@ def run_once(settings, city) -> None:
         now = datetime.time(datetime.now())
         if now < city.dawn().time() or now > city.dusk().time():
             sun_up = False
-            logging.debug("It is night, do not upload PV data")
+            logging.debug('It is night, do not upload PV data')
 
-    # Only fetch data when sup up or when no data stored yet
-    if sun_up or not bool(data):             #
+    # Only fetch data when sup up ??or when no data stored yet
+    # ensure data{} is filled with keys and that generated_energy value is available, also when offline
+    if sun_up or not bool(data):
         gw = gw_api.GoodWeApi(settings.gw_station_id,
                               settings.gw_account, settings.gw_password)
         data = gw.getCurrentReadings()
 
     # Check if we want to abort when offline.
-    # Note that this also disables upload of consumption data and outside temperature
+    # Note that this also disables upload of consumption data and v8_data
     if settings.skip_offline:
         if data['status'] == 'Offline':
-            logging.debug("Skipped upload as the inverter is offline")
+            logging.debug('Skipped upload as the inverter is offline')
             return
 
     # Append reading to named CSV file, consisting of: status / current power (w) / produced today (kWh) / produced total (kWh)
@@ -173,9 +178,9 @@ def run_once(settings, city) -> None:
 
     generated_energy = int(1000 * data['eday_kwh'])
 
-    if generated_energy < last_generated_energy:   # generated energy can not become less
-        generated_energy = last_generated_energy
-    last_generated_energy = generated_energy
+    if generated_energy < last.generated_energy:   # generated energy can not become less
+        generated_energy = last.generated_energy
+    last.generated_energy = generated_energy
 
     logging.debug(
         f"generated energy = {generated_energy}, data['eday_kwh'] = {data['eday_kwh']}")
@@ -183,35 +188,32 @@ def run_once(settings, city) -> None:
 
     # is there a smart meter available to upload consumption data?
     if smartmeter_present:
-        meter_data = sm_api.returndata()  # fetch power meter readings
+        meter_data = sm_api.returndata()  # fetch smart meter readings
         logging.debug(
             f'import_energy {meter_data[0]}, import_power {meter_data[1]}, export_energy {meter_data[2]}, export_power {meter_data[3]}')
-        # logging.debug(
-        #     f'import_energy {meter_data["import_energy"]}, import_power {meter_data["import_power"]}, export_energy {meter_data["export_energy"]}, export_power {meter_data["export_power"]}')
         # consumed energy = imported energy - exported energy + generated energy
         consumed_energy = round(
             meter_data[0] - meter_data[2] + generated_energy)
 
-        # at the start of the day, reset last_cons_wh and eday_wh
+        # at the start of the day, reset variables last.generated_energy and last.consumed_energy
         # midnight with 5 minutes (301 sec) margin, that is the run_once interval
         if (datetime.now().timestamp() - datetime.combine(datetime.now(),
                                                           datetime.min.time()).timestamp() < 301):
-            # should be 0 until we receive new data, so make it persistent between function calls
             generated_energy = 0
-            last_generated_energy = 0
+            last.generated_energy = 0
             consumed_energy = round(meter_data[0] - meter_data[2])
-            last_consumed_energy = consumed_energy
+            last.consumed_energy = consumed_energy
 
-        if consumed_energy < last_consumed_energy:   # consumed energy can not become less
-            consumed_energy = last_consumed_energy
-        last_consumed_energy = consumed_energy
+        if consumed_energy < last.consumed_energy:   # consumed energy can not become less
+            consumed_energy = last.consumed_energy
+        last.consumed_energy = consumed_energy
 
         # consumed power  cons_w  = imported power - exported power + produced power
         consumed_power = round(meter_data[1] - meter_data[3] + generated_power)
 
         if consumed_power < 0:               # power cannot be negative
-            consumed_power = last_consumed_power
-        last_consumed_power = consumed_power
+            consumed_power = last.consumed_power
+        last.consumed_power = consumed_power
 
         logging.debug(
             f'Consumption on {datetime.now().strftime("%Y-%m-%d %H:%M.%S")}  : {consumed_energy}Wh, {consumed_power}W, Production {generated_energy}Wh, {generated_power}W, v8data {v8_data}')
@@ -229,7 +231,7 @@ def run_once(settings, city) -> None:
             f"check generated {generated_power} = {data['Ppv1']} + {data['Ppv2']}")
     else:
         logging.debug(str(data))
-        logging.warning("Missing PVO id and/or key")
+        logging.warning('Missing PVO id and/or key')
 
 
 def copy(settings) -> None:
@@ -379,11 +381,11 @@ def run() -> None:
         datefmt='%d-%m-%Y %H:%M:%S',
         level=numeric_level)
 
-    logging.debug("gw2pvo version %s", __version__)
+    logging.debug(f'gw2pvo version {__version__} ')
 
     # logging configured, start logging what we still had to log from before:
     logging.debug(args)
-    logging.debug(f"Timezone {datetime.now().astimezone().tzinfo}")
+    logging.debug(f'Timezone {datetime.now().astimezone().tzinfo}')
 
     # Check if we want to copy old data
     if args.date:
