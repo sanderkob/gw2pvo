@@ -60,9 +60,9 @@ class PVOutputApi:
 
         if v8_data is not None:
             payload['v8'] = v8_data
-
-        self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
-        logging.debug(payload)
+# 
+        # self.call("https://pvoutput.org/service/r2/addstatus.jsp", payload)
+        logging.info(payload)
 
         # if sun_up:
         #     payload = {
