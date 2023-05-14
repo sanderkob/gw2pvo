@@ -22,7 +22,7 @@ import pvo_api
 # import smartmeter if present, otherwise set smartmeter_present false
 smartmeter_present = True
 try:
-    import smartmeter
+    import smartmeter_mqtt
 except ImportError:
     smartmeter_present = False
     logging.debug("No smart meter present")
@@ -44,11 +44,13 @@ v8_data = None  # user variable may be supplied by MQTT
 keys = ["d", "t", "v1", "v2", "v3", "v4", "v5", "v6",
         "v7", "v8", "v9", "v10", "v11", "v12"]  # fill pvo_data
 pvo_data = {k: None for k in keys}
-
+data = {}
 last_consumed_power = 120     # if consumed_power is negative, replace by earlier value
 last_consumed_energy = 0      # if consumed energy decreases, replace by earlier value
 mqtt_broker = ""
 mqtt_topic = ""
+telegram = ""
+telegram_midnight = ""
 
 
 def on_message(client, userdata, message) -> None:
@@ -57,18 +59,21 @@ def on_message(client, userdata, message) -> None:
         client (paho.mqtt.client.Client): client instance that is calling the callback
         userdata (_type_): user data of any type, can be set when creating a new client - not used
         message (str): _description_    """
+    global v8_data
+    global telegram
     message.payload = message.payload.decode("utf-8")
     # print("message received ", message.payload)
     # print("message topic=", message.topic)
     # print("message qos=", message.qos)
     # print("message retain flag=", message.retain)
-
-    # split in case message contains severable items separated by spaces
-    msglist = message.payload.split(" ")
-    logging.info("msglist: %s", msglist)
-    # first or only item in message
-    global v8_data
-    v8_data = msglist[0]
+    if message.topic == mqtt_topic:
+        # split in case message contains severable items separated by spaces
+        msglist = message.payload.split(" ")
+        logging.info("msglist: %s", msglist)
+        # first or only item in message
+        v8_data = msglist[0]
+    if message.topic == 'beeclear':
+        telegram = message.payload
 
 
 def on_connect(client, userdata, flags, rc) -> None:
@@ -127,7 +132,7 @@ def on_log(client, userdata, level, buf) -> None:
     logging.debug(f"log: {buf}")
 
 
-def run_once(pvo_data, settings, city) -> None:
+def run_once(pvo_data, data, settings, city) -> None:
     """misleading name, the function is executed every 'Interval' minutes.
     It handles downloads of data from powerhandler, uploads to PVOutput, copying of day readings and preparing csv file.
     Args:
@@ -136,10 +141,14 @@ def run_once(pvo_data, settings, city) -> None:
     global last_consumed_power
     global last_consumed_energy
     global v8_data
+    global telegram
+    global telegram_midnight
 
     # inline function to round if not None
     def r(x): return round(x) if x else None
 
+    # print (telegram)
+    
     # Check daylight for enabling pvo upload
     sun_up = True
     if city:
@@ -153,7 +162,8 @@ def run_once(pvo_data, settings, city) -> None:
         gw = gw_api.GoodWeApi(settings.gw_station_id,
                               settings.gw_account, settings.gw_password)
         data = gw.getCurrentReadings()
-
+    # Request smart meter reading
+    
     # Check if we want to abort when offline.
     # Note that this also disables upload of consumption data and outside temperature
     if settings.skip_offline:
@@ -182,21 +192,31 @@ def run_once(pvo_data, settings, city) -> None:
     generated_power = round(data['pgrid_w'])
 
     # is there a smart meter available to upload consumption data?
-    if smartmeter_present:
-        meter_data = smartmeter.returndata()           # fetch power meter readings
+    if smartmeter_present and len(telegram):
+        print(telegram)
+        print(len(telegram))
+        if len(telegram):
+            print('true')
+        else:
+            print('false')
+        meter_data = smartmeter_mqtt.returndata(telegram, telegram_midnight)  # fetch power meter readings
+        # logging.debug(
+        #     f'import_energy {meter_data[0]}, import_power {meter_data[1]}, export_energy {meter_data[2]}, export_power {meter_data[3]}')
         logging.debug(
-            f'import_energy {meter_data[0]}, import_power {meter_data[1]}, export_energy {meter_data[2]}, export_power {meter_data[3]}')
-
+            f'import_energy {meter_data["import_energy"]}, import_power {meter_data["import_power"]}, export_energy {meter_data["export_energy"]}, export_power {meter_data["export_power"]}')
         # consumed energy = imported energy - exported energy + generated energy
         consumed_energy = round(
-            meter_data[0] - meter_data[2] + generated_energy)
+            meter_data["import_energy"] - meter_data["export_energy"] + generated_energy)
 
         # at the start of the day, reset last_cons_wh and eday_wh
+        # midnight with 5 minutes (301 sec) margin, that is the run_once interval
         if (datetime.now().timestamp() - datetime.combine(datetime.now(), 
-                                                          datetime.min.time()).timestamp() < 301):  # midnight
+                                                          datetime.min.time()).timestamp() < 301): 
+            telegram_midnight=telegram
+            print (telegram_)
             # should be 0 until we receive new data, so make it persistent between function calls
             data['eday_kwh'] = 0
-            consumed_energy = round(meter_data[0] - meter_data[2])
+            consumed_energy = round(meter_data["import_energy"] - meter_data["export_energy"])
             last_consumed_energy = consumed_energy
 
         if consumed_energy < last_consumed_energy:   # consumed energy can not become less
@@ -204,7 +224,7 @@ def run_once(pvo_data, settings, city) -> None:
             last_consumed_energy = consumed_energy
 
         # consumed power  cons_w  = imported power - exported power + produced power
-        consumed_power = round(meter_data[1] - meter_data[3] + generated_power)
+        consumed_power = round(meter_data["import_power"] - meter_data["export_power"] + generated_power)
         if consumed_power < 0:               # power cannot be negative
             consumed_power = last_consumed_power
             last_consumed_power = consumed_power
@@ -242,12 +262,13 @@ def run_once(pvo_data, settings, city) -> None:
         pvo_data.update(update)
     logging.debug(
         f"check generated {generated_power} = {data['Ppv1']} + {data['Ppv2']}")
-    if settings.pvo_system_id and settings.pvo_api_key:
-        pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
-        pvo.add_status(pvo_data)
-    else:
-        logging.debug(str(data))
-        logging.warning("Missing PVO id and/or key")
+    # test
+    # if settings.pvo_system_id and settings.pvo_api_key:
+    #     pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
+    #     pvo.add_status(pvo_data)
+    # else:
+    #     logging.debug(str(data))
+    #     logging.warning("Missing PVO id and/or key")
 
 
 def copy(settings) -> None:
@@ -424,13 +445,14 @@ def run() -> None:
         # client.on_log=on_log                              # for troubleshooting
         client.loop_start()                                 # start the loop
         client.subscribe(mqtt_topic, 1)
+        client.subscribe('beeclear', 1)
 
     startTime = datetime.now()
     print(startTime)
 
     while True:
         try:
-            run_once(pvo_data, args, city)
+            run_once(pvo_data, data, args, city)
         except KeyboardInterrupt:
             sys.exit(1)
         except Exception as exp:
@@ -438,6 +460,7 @@ def run() -> None:
             logging.error(exp)
         if args.pvo_interval is None:
             break
+        
         interval = args.pvo_interval * 60
         time.sleep(interval - (datetime.now() - startTime).seconds % interval)
 
