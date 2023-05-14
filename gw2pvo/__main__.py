@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-
-import pvo_api
-import gw_csv
-import gw_api
-from __init__ import __version__
-import paho.mqtt.client as mqtt
-from astral.location import Location
-from astral.geocoder import lookup, database
 import sys
 if sys.version_info < (3, 6):
     sys.exit('Sorry, you need at least Python 3.6 for Astral 2')
@@ -19,6 +11,14 @@ import argparse
 import logging
 import traceback            # added in version 2
 sys.tracebacklimit = 0      # but only used for debugging, set = 0 to disable
+import paho.mqtt.client as mqtt
+from astral.location import Location
+from astral.geocoder import lookup, database
+from __init__ import __version__
+import pvo_api
+import gw_csv
+import gw_api
+import ema_aver
 # import smartmeter if present, otherwise set smartmeter_present false
 smartmeter_present = True
 try:
@@ -48,6 +48,8 @@ v8_data = None  # user variable may be supplied by MQTT
 mqtt_broker = ""
 mqtt_topic = ""
 
+alpha = 0.67  # exponential moving average
+ema = ema_aver.MovingAverage(alpha)
 
 def on_message(client, userdata, message) -> None:
     """MQTT callback funtion for incoming message
@@ -192,8 +194,7 @@ def run_once(settings, city) -> None:
         logging.debug(
             f'import_energy {meter_data[0]}, import_power {meter_data[1]}, export_energy {meter_data[2]}, export_power {meter_data[3]}')
         # consumed energy = imported energy - exported energy + generated energy
-        consumed_energy = round(
-            meter_data[0] - meter_data[2] + generated_energy)
+        consumed_energy = round(meter_data[0] - meter_data[2] + generated_energy)
 
         # at the start of the day, reset variables last.generated_energy and last.consumed_energy
         # midnight with 5 minutes (301 sec) margin, that is the run_once interval
@@ -204,14 +205,15 @@ def run_once(settings, city) -> None:
             consumed_energy = round(meter_data[0] - meter_data[2])
             last.consumed_energy = consumed_energy
 
-        if consumed_energy < last.consumed_energy:   # consumed energy can not become less
+        if consumed_energy < last.consumed_energy:  # consumed energy can not become less
             consumed_energy = last.consumed_energy
         last.consumed_energy = consumed_energy
 
         # consumed power  cons_w  = imported power - exported power + produced power
-        consumed_power = round(meter_data[1] - meter_data[3] + generated_power)
+        # exponential moving average
+        consumed_power = round(ema.add(meter_data[1] - meter_data[3] + generated_power))
 
-        if consumed_power < 0:               # power cannot be negative
+        if consumed_power < 0:  # power cannot be negative
             consumed_power = last.consumed_power
         last.consumed_power = consumed_power
 
