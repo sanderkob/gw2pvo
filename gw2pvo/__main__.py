@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+
+import sys
+if sys.version_info < (3, 6):
+    sys.exit('Sorry, you need at least Python 3.6 for Astral 2')
+import argparse
+from configparser import ConfigParser
+import datetime
+import locale
+import logging
+import time
+import traceback  # added in version 2
+sys.tracebacklimit = 2      # but only used for debugging, set = 0 to disable
+import uuid
+import paho.mqtt.client as mqtt
+from astral.geocoder import database, lookup
+from astral.location import Location
+from __init__ import __version__
+import gw_api
+import gw_csv
+import gw_raw
+import pvo_api
+# import smartmeter if present, otherwise set smartmeter_present false
+smartmeter_present = True
+try:
+    import sm_api
+except ImportError:
+    smartmeter_present = False
+    logging.debug('No smart meter present')
+
+__author__ = "Mark Ruys, Sander Kobussen"
+__copyright__ = "Copyright 2017-2020, Mark Ruys; 2023 Sander Kobussen"
+__license__ = "MIT"
+__email__ = "mark@paracas.nl"
+__doc__ = "Upload GoodWe power inverter data to PVOutput.org"
+
+
+class last:
+    '''serves to preserve values of variables inside run_once()) between calls and
+    also when the inverter is offline'''
+    consumed_power = 0       # if consumed_power is negative, replace by earlier value
+    consumed_energy = 0      # if consumed energy decreases, replace by earlier value
+
+
+# initializing global variables
+data = {}           # initialize gw data, global so we know if to download
+v8_data = None      # user variable, it may be supplied by MQTT
+mqtt_broker = ""
+mqtt_topic = ""
+
+
+def on_message(client, userdata, message) -> None:
+    """MQTT callback funtion for incoming message
+    Args:
+        client (paho.mqtt.client.Client): client instance that is calling the callback
+        userdata (_type_): user data of any type, can be set when creating a new client - not used
+        message (str): _description_    """
+    global v8_data
+    global mqtt_topic
+    message.payload = message.payload.decode("utf-8")
+    # print("message received ", message.payload)
+    # print("message topic=", message.topic)
+    # print("message qos=", message.qos)
+    # print("message retain flag=", message.retain)
+    if message.topic == mqtt_topic:
+        # split in case message contains severable items separated by spaces
+        msglist = message.payload.split(" ")
+        logging.info(f'msglist: {msglist}')
+        # first or only item in message
+        v8_data = msglist[0]
+
+
+def on_connect(client, userdata, flags, rc) -> None:
+    """MQTT called when connection established
+    Args:
+        client (paho.mqtt.client.Client): client instance that is calling the callback
+        userdata (_type_): user data of any type, can be set when creating a new client - not used
+        flags (dict): flags contains response flags from the broker:
+            flags['session present'] -  this flag is only useful for a client that uses clean session=0.
+                                        If such clients reconnect to a broker it has previously connected to,
+                                        this flag indicates whether the broker still has the
+                                        session information for the client. If 1, the session still exists.
+            rc (int): Connection Return Codes
+                                        0: Connection successful
+                                        1: Connection refused - incorrect protocol version
+                                        2: Connection refused - invalid client identifier
+                                        3: Connection refused - server unavailable
+                                        4: Connection refused - bad username or password
+                                        5: Connection refused - not authorised
+                                        6-255: Currently unused."""
+
+    global mqtt_topic
+    if rc == 0:
+        logging.info('connected OK Returned code=0')
+        # subscribe to topic with qos=1
+        client.subscribe(mqtt_topic, 1)
+    else:
+        logging.error(f'Bad connection Returned code= {rc}')
+
+
+def on_disconnect(client, userdata, rc) -> None:
+    """MQTT called when the client disconnects from the broker.
+    Args:
+        client (paho.mqtt.client.Client): client instance that is calling the callback
+        userdata (_type_): user data of any type, can be set when creating a new client - not used
+        rc (int): rc indicates the disconnection state. If 0 (MQTT_ERR_SUCCESS),
+                  the callback was called in response to a disconnect() call.
+                  If any other value, the disconnection was unexpected (e.g. network error)"""
+    global mqtt_broker
+    logging.warning('Client Got Disconnected')
+    if rc != 0:
+        logging.warning('Unexpected MQTT disconnection. Will auto-reconnect')
+    else:
+        logging.warning(f'rc value: {rc}')
+    try:
+        client.connect(mqtt_broker, keepalive=60)
+    except Exception as e:
+        logging.error(f'Error in Retrying to Connect: {e}')
+
+
+def on_log(client, userdata, level, buf) -> None:
+    """called when the client has log information.
+    Args:
+        client (paho.mqtt.client.Client): client instance that is calling the callback
+        userdata (_type_): user data of any type, can be set when creating a new client - not used
+        level (str):  Level is one of MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR or MQTT_LOG_DEBUG
+        buf (_type_): log message"""
+    logging.debug(f'log: {buf}')
+
+
+def run_once(settings, city) -> None:
+    """misleading name, the function is executed every 'Interval' minutes.
+    It handles downloads of data from smart meter, uploads to PVOutput, copying of day readings and preparing csv file.
+    Args:
+        settings (_type_): config settings from file, passed from args
+        city (dict): city geo-location derived from city name in config, used to set timezone in non-Windows and skip uploads from dusk till dawn"""
+
+    global data  # Goodwe data to be received
+    global v8_data  # extra data from mqtt
+
+    # Check daylight for enabling pvo upload
+    # sun_up = True
+    # if city:
+    #     now = datetime.time(datetime.now())
+    #     if now < city.dawn().time() or now > city.dusk().time():
+    #         sun_up = False
+    #         logging.debug('It is night, do not upload PV data')
+
+    # alternative to check with import datetime but note midnight check
+    sun_up = False
+    if city:
+        if (city.dawn().time() <
+            datetime.datetime.now().time() <
+            city.dusk().time()):
+            sun_up = True
+        else:
+            logging.debug('It is night, do not upload PV data')
+
+    # Only fetch data when sup up ??or when no data stored yet
+    # ensure data{} is filled with keys and that generated_energy value is available, also when offline
+    if sun_up or not bool(data):
+        gw = gw_api.GoodWeApi(settings.gw_station_id,
+                              settings.gw_account, settings.gw_password)
+        data = gw.getCurrentReadings()
+
+    # Check if we want to abort when offline.
+    # Note that this also disables upload of consumption data and v8_data
+    if settings.skip_offline and data['status'] == 'Offline':
+        logging.debug('Skipped upload as the inverter is offline')
+        return
+
+    # Append reading to named CSV file, consisting of: status / current power (w) / produced today (kWh) / produced total (kWh)
+    if settings.csv:
+        if data['status'] == 'Offline':
+            logging.debug("Don't append offline data to CSV file")
+        else:
+            locale.setlocale(locale.LC_ALL, locale.getlocale())
+            csv = gw_csv.GoodWeCSV(settings.csv)
+            csv.append(data)
+
+    # no temperature upload, the outside temperature can be derived from OpenWeatherMap through automatic upload in PVOutput to v5
+    temperature = None
+    inverter_temperature = data['temperature']
+    voltage = data['grid_voltage']
+    if settings.pv_voltage:
+        voltage = data['pv_voltage']
+
+    generated_energy = int(1000 * data['eday_kwh'])
+    # check if it is dark after midnight
+    if (datetime.time(0, 0) <
+            datetime.datetime.now().time() <
+            datetime.time(12, 0)
+            and not sun_up):
+        generated_energy = 0
+    generated_power = round(data['pgrid_w'])
+    logging.debug(
+        f"generated energy = {generated_energy}, data['eday_kwh'] = {data['eday_kwh']}")
+
+    # is there a smart meter available to upload consumption data?
+    if smartmeter_present:
+        meter_data = sm_api.returndata()  # fetch smart meter readings
+        import_energy = meter_data[0]
+        import_power = meter_data[1]
+        export_energy = meter_data[2]
+        export_power = meter_data[3]
+        logging.debug(
+            f'import_energy {import_energy}, import_power {import_power}, export_energy {export_energy}, export_power {export_power}')
+        # consumed energy = imported energy - exported energy + generated energy
+        consumed_energy = round(
+            import_energy - export_energy + generated_energy)
+
+        if consumed_energy < last.consumed_energy:   # consumed energy can not become less
+            consumed_energy = last.consumed_energy
+        last.consumed_energy = consumed_energy
+
+        # consumed power  cons_w  = imported power - exported power + produced power
+        consumed_power = round(import_power - export_power + generated_power)
+
+        if consumed_power < 0:               # power cannot be negative
+            consumed_power = last.consumed_power
+        last.consumed_power = consumed_power
+
+        logging.debug(
+            f'Consumption on {datetime.datetime.now().strftime("%Y-%m-%d %H:%M.%S")}  : {consumed_energy}Wh, {consumed_power}W, Production {generated_energy}Wh, {generated_power}W, v8data {v8_data}')
+
+    # Append reading to named CSV file, consisting of:
+    #   date
+    #   time
+    #   generated energy kWh
+    #   generated power W
+    #   consumed energy kWh
+    #   consumed power W
+    #   imported energy kWh
+    #   import power W
+    #   export energy kWh
+    #   expert power W
+    if settings.raw:
+        t = time.localtime()
+        raw_data = {
+            'd': "{:04}{:02}{:02}".format(t.tm_year, t.tm_mon, t.tm_mday),
+            't': "{:02}:{:02}".format(t.tm_hour, t.tm_min),
+            'generated_energy': generated_energy,
+            'generated_power': generated_power,
+            'consumed_energy': consumed_energy,
+            'consumed_power': consumed_power,
+            'import_energy': import_energy,
+            'import_power': import_power,
+            'export_energy': export_energy,
+            'export_power': export_power
+        }
+        # make sure utf8 locale is installed on the host
+        locale.setlocale(locale.LC_ALL, locale.getlocale())
+        csv = gw_raw.RawCSV(settings.raw)   # get filename
+        csv.append(raw_data)
+
+    # send out data to PVoutput
+    if settings.pvo_system_id and settings.pvo_api_key:
+        pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
+        if smartmeter_present:
+            pvo.add_status(sun_up, generated_power, generated_energy, consumed_energy, consumed_power, temperature,
+                           voltage, inverter_temperature, v8_data, data['vpv1'], data['vpv2'], data['Ppv1'], data['Ppv2'], export_power, import_power)
+        else:
+            pvo.add_status(sun_up, generated_power, generated_energy, None, None, temperature, voltage,
+                           inverter_temperature, v8_data, None, None, None, None, None, None)
+        logging.debug(
+            f"check generated {generated_power} = {data['Ppv1']} + {data['Ppv2']}")
+    else:
+        logging.debug(str(data))
+        logging.warning('Missing PVO id and/or key')
+    logging.debug(f"debug,{generated_power}, {generated_energy}, {consumed_energy}, {consumed_power}, {temperature},{voltage}, {inverter_temperature}, {v8_data},{data['vpv1']}, {data['vpv2']}, {data['Ppv1']}, {data['Ppv2']}, export_power, import power")
+    # print(consumed_energy, last.consumed_energy)
+    # print(consumed_power, last.consumed_power)
+
+
+def copy(settings) -> None:
+    """copy day of readings from GoodWe to PVOutput. Interval will be 10 minutes.
+       Beware that the date parameter must be not be older than 14 days from the current date,
+       in donation mode not more than 90 days.
+    Args:
+        settings (Namespace): the settings from the gw2pvo.cfg file"""
+    # Fetch readings from GoodWe
+    date = datetime.datetime.strptime(settings.date, "%Y-%m-%d")
+    gw = gw_api.GoodWeApi(settings.gw_station_id,
+                          settings.gw_account, settings.gw_password)
+    daydata = gw.getDayReadings(date)
+
+    if settings.pvo_system_id and settings.pvo_api_key:
+        # Submit readings to PVOutput
+        pvo = pvo_api.PVOutputApi(settings.pvo_system_id, settings.pvo_api_key)
+        pvo.add_day(daydata['entries'])
+    else:
+        for entry in daydata['entries']:
+            logging.info(
+                f"{entry['dt']}: {entry['pgrid_w']:6.0f} W {entry['eday_wh']:6.2f} kWh")
+        logging.warning("Missing PVO id and/or key")
+
+
+def run() -> None:
+    """main function:
+       parses gw2pvo.cfg configuration file
+       configures logging,
+       configures mqtt (if enabled),
+       triggers run_once and repeats that at intervals"""
+    global mqtt_topic
+    global mqtt_broker
+    defaults: dict[str, str] = {
+        'log': "info"
+    }
+
+    # Parse any config file specification.
+    # add_help=False so that it doesn't accept -h as input and no help is printed
+    conf_parser = argparse.ArgumentParser(
+        # formatter_class only relevant in commandline use, since add_help=False, not tested
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False
+    )
+    conf_parser.add_argument(
+        "--config", help="Specify config file", metavar='FILE')
+    args, remaining_argv = conf_parser.parse_known_args()  # remaining_argv not used
+
+    # Read configuration file and add it to the defaults hash.
+    if args.config:
+        config = ConfigParser()
+        config.read(args.config)
+        if "Defaults" in config:
+            defaults.update(dict(config.items("Defaults")))
+        else:
+            sys.exit("Bad config file, missing Defaults section")
+    else:
+        config = ConfigParser()
+        config.read('gw2pvo/gw2pvo.cfg')  # test
+        # config.read('gw2pvo.cfg')
+        if "Defaults" in config:
+            defaults.update(dict(config.items("Defaults")))
+        else:
+            sys.exit("Bad config file, missing Defaults section")
+
+    # Parse rest of arguments
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        parents=[conf_parser],
+    )
+    # add options from the Defaults section to be parsed
+    parser.set_defaults(**defaults)
+    parser.add_argument(
+        "--gw-station-id", help="GoodWe station ID", metavar='ID')
+    parser.add_argument(
+        "--gw-account", help="GoodWe account", metavar='ACCOUNT')
+    parser.add_argument(
+        "--gw-password", help="GoodWe password", metavar='PASSWORD')
+    parser.add_argument(
+        "--pvo-system-id", help="PVOutput system ID", metavar='ID')
+    parser.add_argument(
+        "--pvo-api-key", help="PVOutput API key", metavar='KEY')
+    parser.add_argument(
+        "--pvo-interval", help="PVOutput interval in minutes", type=int, choices=[5, 10, 15])
+    parser.add_argument(
+        "--log", help="Set log level (default info)", choices=['debug', 'info', 'warning', 'critical'])
+    parser.add_argument(
+        "--date", help="Copy all readings (max 14/90 days ago)", metavar='YYYY-MM-DD')
+    parser.add_argument(
+        "--pv-voltage", help="Send pv voltage instead of grid voltage", action='store_true')
+    parser.add_argument(
+        "--skip-offline", help="Skip uploads when inverter is offline", action='store_true')
+    parser.add_argument(
+        "--city", help="Sets timezone and skip uploads from dusk till dawn")
+    parser.add_argument(
+        '--csv', help="Append readings to a Excel CSV file, DATE in the name will be replaced by the current date")
+    parser.add_argument(
+        '--raw', help="Append generated and consumed data to a Excel CSV file, DATE in the name will be replaced by the current date")
+    parser.add_argument(
+        '--mqtt', help="Enable MQTT subscribe (receive messages)", type=str, nargs=2)
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + __version__)
+    args = parser.parse_args()
+
+    # enable mqtt if mqtt_broker and mqtt_topic are configured
+    mqtt_present = False
+    mqtt_args = args.mqtt.split()
+    if len(mqtt_args) == 2:
+        mqtt_broker = mqtt_args[0]
+        mqtt_topic = mqtt_args[1]
+        mqtt_present = True
+
+    # added in version2
+    # with action=store_true the args are True, even when set to 'no' in  the config file
+    # so we check the actual value of the args
+    if isinstance(args.skip_offline, str):
+        args.skip_offline = args.skip_offline.lower() in [
+            'true', 'yes', 'on', '1']
+    if isinstance(args.pv_voltage, str):
+        args.pv_voltage = args.pv_voltage.lower() in ['true', 'yes', 'on', '1']
+
+    if args.gw_station_id is None or args.gw_account is None or args.gw_password is None:
+        sys.exit("Missing --gw-station-id, --gw-account and/or --gw-password")
+    if args.city:
+        try:
+            city = Location(lookup(args.city, database()))
+        except KeyError as ke:
+            sys.exit(f"City not found - {ke}")
+    # this is disabled, maybe necessary when running in windows:
+    #   os.environ['TZ'] = city.timezone
+    #   time.tzset()
+    else:
+        city = None
+
+    # Configure the logging
+    # numeric level:
+    #     NOTSET=0
+    #     DEBUG=10
+    #     INFO=20
+    #     WARN=30
+    #     ERROR=40
+    #     CRITICAL=50
+    numeric_level = getattr(logging, args.log.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f'Invalid log level: {numeric_level}')
+
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        datefmt='%d-%m-%Y %H:%M:%S',
+        level=numeric_level)
+
+    logging.debug(f'gw2pvo version {__version__} ')
+
+    # logging configured, start logging what we still had to log from before:
+    logging.debug(args)
+    logging.debug(f'Timezone {datetime.datetime.now().astimezone().tzinfo}')
+
+    # Check if we want to copy old data
+    if args.date:
+        try:
+            copy(args)
+        except KeyboardInterrupt:
+            sys.exit(1)
+        except Exception as exp:
+            logging.error(exp)
+        sys.exit()
+
+    # setup MQTT
+    if mqtt_present:
+        # create new instance with unique ID
+        client = mqtt.Client("gw2pvo" + str(uuid.uuid4()))
+        client.connect(mqtt_broker, keepalive=60)           # connect to broker
+        client.on_message = on_message
+        client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
+        # client.on_log=on_log                              # for troubleshooting
+        client.loop_start()                                 # start the loop
+        client.subscribe(mqtt_topic, 1)
+
+    startTime = datetime.datetime.now()
+    print(startTime)
+
+    while True:
+        try:
+            run_once(args, city)
+        except KeyboardInterrupt:
+            sys.exit(1)
+        except Exception as exp:
+            logging.error(datetime.datetime.now(), traceback.format_exc())
+            logging.error(exp)
+        if args.pvo_interval is None:
+            break
+
+        interval = args.pvo_interval * 60
+        time.sleep(interval - (datetime.datetime.now() - startTime).seconds % interval)
+
+
+if __name__ == "__main__":
+    run()
